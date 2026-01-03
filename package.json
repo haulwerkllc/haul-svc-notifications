@@ -4,9 +4,24 @@
   "description": "<!-- title: 'AWS NodeJS Example' description: 'This template demonstrates how to deploy a simple NodeJS function running on AWS Lambda using the Serverless Framework.' layout: Doc framework: v4 platform: AWS language: nodeJS priority: 1 authorLink: 'https://github.com/serverless' authorName: 'Serverless, Inc.' authorAvatar: 'https://avatars1.githubusercontent.com/u/13742415?s=200&v=4' -->",
   "license": "ISC",
   "author": "",
-  "type": "commonjs",
-  "main": "handler.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "serverless": "4.25.0",
+    "serverless-plugin-include-dependencies": "^6.1.1",
+    "serverless-prune-plugin": "^2.1.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.948.0",
+    "@aws-sdk/lib-dynamodb": "^3.948.0",
+    "@aws-sdk/client-sqs": "^3.948.0",
+    "@aws-sdk/client-eventbridge": "^3.948.0",
+    "@aws-sdk/client-ses": "^3.948.0",
+    "@aws-sdk/client-pinpoint": "^3.948.0",
+    "@aws-sdk/protocol-http": "^3.370.0",
+    "@aws-sdk/signature-v4": "^3.370.0",
+    "@opensearch-project/opensearch": "^3.5.1",
+    "zod": "^3.24.1"
   }
 }

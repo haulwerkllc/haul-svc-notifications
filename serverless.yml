@@ -1,14 +1,103 @@
-# "org" ensures this Service is used with the correct Serverless Framework Access Key.
 org: raffibag
-# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
 app: haul-microservices
-# "service" is the name of this project. This will also be added to your AWS resource names.
 service: haul-svc-notifications
+frameworkVersion: '4'
 
 provider:
   name: aws
+  versionFunctions: false
   runtime: nodejs20.x
+  region: us-west-2
+  profile: raffibag
+  environment:
+    ENV: ${sls:stage}
+    REGION: ${aws:region}
+    DOMAIN_NAME: ${self:custom.env.DOMAIN_NAME}
+    MEDIA_BASE_URL: ${self:custom.env.MEDIA_BASE_URL}
+    BASE_URL: ${self:custom.env.BASE_URL}
+    USER_POOL_ID: ${self:custom.env.USER_POOL_ID}
+    USER_POOL_NAME: ${self:custom.env.USER_POOL_NAME}
+    COGNITO_DOMAIN: ${self:custom.env.COGNITO_DOMAIN}
+    NOTIFICATION_PREFERENCE_TABLE_NAME: NotificationPreference-${sls:stage}
+    NOTIFICATION_INBOX_TABLE_NAME: NotificationInbox-${sls:stage}
+    DEVICE_ENDPOINT_TABLE_NAME: DeviceEndpoint-${sls:stage}
+    SMS_ORIGINATION_IDENTITY_ARN: ${self:custom.env.SMS_ORIGINATION_IDENTITY_ARN, ''}
+    SMS_ORIGINATION_NUMBER: ${self:custom.env.SMS_ORIGINATION_NUMBER, ''}
+    SES_FROM_ADDRESS: ${self:custom.env.SES_FROM_ADDRESS, ''}
+    SES_SOURCE_ARN: ${self:custom.env.SES_SOURCE_ARN, ''}
+    REDIS_HOST: ${ssm:/haul/${sls:stage}/redis/host}
+    REDIS_PORT: ${ssm:/haul/${sls:stage}/redis/port}
+    REDIS_USERNAME: ${ssm:/haul/${sls:stage}/redis/username}
+    REDIS_PASSWORD: ${ssm:/haul/${sls:stage}/redis/password}
+    LOCATION_UPDATE_TOPIC_ARN: ${ssm:/haul/${sls:stage}/sns/location-updates-topic-arn}
+    GOOGLE_PLACES_API_KEY: ${ssm:/haul/${sls:stage}/google/places-api-key}
+  iam:
+      role:
+        statements:
+          - Effect: Allow
+            Action:
+              - apigateway:*
+              - iam:PassRole
+              - s3:*
+              - cognito-idp:*
+              - sns:Publish
+              - ses:*
+              - ssm:*
+              - lambda:InvokeFunction
+              - events:PutEvents
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - dynamodb:*
+            Resource:
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationPreference-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationPreference-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationInbox-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationInbox-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/DeviceEndpoint-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/DeviceEndpoint-${sls:stage}/*
+          - Effect: Allow
+            Action:
+              - es:ESHttpGet
+              - es:ESHttpHead
+            Resource:
+              - arn:aws:es:${aws:region}:${aws:accountId}:domain/haul-opensearch-${sls:stage}/*
+          - Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:AssignPrivateIpAddresses
+              - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
+
+custom: 
+  env: ${file(env.${sls:stage}.json)}
+  prune:
+    automatic: true
+    number: 5
+  includeDependencies:
+    ignore:
+      - aws-crt
 
 functions:
-  hello:
-    handler: handler.hello
+  - ${file(./functions/orchestrator/serverless.yml)}
+  - ${file(./functions/channels/email/serverless.yml)}
+  - ${file(./functions/channels/push/serverless.yml)}
+  - ${file(./functions/channels/sms/serverless.yml)}
+
+resources:
+  - ${file(./resources/eventbridge.yml)}
+  - ${file(./resources/sqs.yml)}
+  - ${file(./resources/ses.yml)}
+  - ${file(./resources/iam.yml)}
+  - ${file(./resources/pinpoint.yml)}
+
+package:
+  individually: false
+  excludeDevDependencies: false
+
+plugins:
+  - serverless-plugin-include-dependencies
+  - serverless-prune-plugin
+
