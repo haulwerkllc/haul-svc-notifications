@@ -21,10 +21,13 @@ provider:
     NOTIFICATION_PREFERENCE_TABLE_NAME: NotificationPreference-${sls:stage}
     NOTIFICATION_INBOX_TABLE_NAME: NotificationInbox-${sls:stage}
     DEVICE_ENDPOINT_TABLE_NAME: DeviceEndpoint-${sls:stage}
+    JOB_TABLE_NAME: Job-${sls:stage}
+    USER_TABLE_NAME: User-${sls:stage}
+    COMPANY_ROLE_TABLE_NAME: CompanyRole-${sls:stage}
+    SES_FROM_ADDRESS: ${self:custom.env.SES_FROM_ADDRESS}
+    SES_SOURCE_ARN: ${self:custom.env.SES_SOURCE_ARN}
     SMS_ORIGINATION_IDENTITY_ARN: ${self:custom.env.SMS_ORIGINATION_IDENTITY_ARN, ''}
     SMS_ORIGINATION_NUMBER: ${self:custom.env.SMS_ORIGINATION_NUMBER, ''}
-    SES_FROM_ADDRESS: ${self:custom.env.SES_FROM_ADDRESS, ''}
-    SES_SOURCE_ARN: ${self:custom.env.SES_SOURCE_ARN, ''}
     REDIS_HOST: ${ssm:/haul/${sls:stage}/redis/host}
     REDIS_PORT: ${ssm:/haul/${sls:stage}/redis/port}
     REDIS_USERNAME: ${ssm:/haul/${sls:stage}/redis/username}
@@ -36,15 +39,11 @@ provider:
         statements:
           - Effect: Allow
             Action:
-              - apigateway:*
-              - iam:PassRole
-              - s3:*
-              - cognito-idp:*
-              - sns:Publish
-              - ses:*
-              - ssm:*
-              - lambda:InvokeFunction
-              - events:PutEvents
+              - ses:SendEmail
+              - ses:SendRawEmail
+              - sms-voice:SendTextMessage
+              - messaging:SendMessage
+              - sqs:SendMessage
             Resource: "*"
           - Effect: Allow
             Action:
@@ -56,6 +55,12 @@ provider:
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationInbox-${sls:stage}/*
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/DeviceEndpoint-${sls:stage}
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/DeviceEndpoint-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Job-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Job-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/CompanyRole-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/CompanyRole-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/User-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/User-${sls:stage}/*
           - Effect: Allow
             Action:
               - es:ESHttpGet
@@ -91,7 +96,6 @@ resources:
   - ${file(./resources/sqs.yml)}
   - ${file(./resources/ses.yml)}
   - ${file(./resources/iam.yml)}
-  - ${file(./resources/pinpoint.yml)}
 
 package:
   individually: false

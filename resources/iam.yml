@@ -1,0 +1,29 @@
+Resources:
+  # ================================
+  # IAM Policies for Notification Service
+  # ================================
+
+  # Policy: Orchestrator can send to SQS queues
+  OrchestratorSQSPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: haul-notifications-orchestrator-sqs-${sls:stage}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueUrl
+            Resource:
+              - Fn::GetAtt:
+                  - EmailChannelQueue
+                  - Arn
+              - Fn::GetAtt:
+                  - PushChannelQueue
+                  - Arn
+              - Fn::GetAtt:
+                  - SmsChannelQueue
+                  - Arn
+      Roles:
+        - Ref: IamRoleLambdaExecution

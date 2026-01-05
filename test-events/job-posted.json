@@ -1,0 +1,38 @@
+{
+  "version": "0",
+  "id": "01234567-89ab-cdef-0123-456789abcdef",
+  "detail-type": "haul.job.posted",
+  "source": "haul.jobs",
+  "account": "123456789012",
+  "time": "2026-01-04T12:00:00Z",
+  "region": "us-west-2",
+  "resources": [],
+  "detail": {
+    "event_id": "evt_job_posted_20260104_001",
+    "event_type": "haul.job.posted",
+    "occurred_at": "2026-01-04T12:00:00Z",
+    "actor": {
+      "type": "user",
+      "id": "USER#customer123"
+    },
+    "recipients": {
+      "mode": "explicit",
+      "user_ids": [
+        "USER#provider456"
+      ]
+    },
+    "entity": {
+      "type": "job",
+      "id": "JOB#789xyz"
+    },
+    "context": {
+      "job_id": "JOB#789xyz",
+      "job_title": "Move furniture from LA to San Diego",
+      "job_url": "https://haul.app/jobs/789xyz",
+      "posted_at": "2026-01-04T12:00:00Z",
+      "pickup_city": "Los Angeles",
+      "dropoff_city": "San Diego",
+      "estimated_distance_miles": 120
+    }
+  }
+}

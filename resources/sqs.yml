@@ -1,0 +1,64 @@
+Resources:
+  # ================================
+  # SQS Queues for Channel Fan-out
+  # ================================
+
+  # Email Channel Queue
+  EmailChannelQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-email-${sls:stage}
+      VisibilityTimeout: 360  # 6 minutes (6x Lambda timeout)
+      MessageRetentionPeriod: 1209600  # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - EmailChannelDLQ
+            - Arn
+        maxReceiveCount: 3
+
+  EmailChannelDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-email-dlq-${sls:stage}
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  # Push Channel Queue
+  PushChannelQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-push-${sls:stage}
+      VisibilityTimeout: 180  # 3 minutes (6x Lambda timeout)
+      MessageRetentionPeriod: 1209600  # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - PushChannelDLQ
+            - Arn
+        maxReceiveCount: 3
+
+  PushChannelDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-push-dlq-${sls:stage}
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  # SMS Channel Queue
+  SmsChannelQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-sms-${sls:stage}
+      VisibilityTimeout: 180  # 3 minutes (6x Lambda timeout)
+      MessageRetentionPeriod: 1209600  # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - SmsChannelDLQ
+            - Arn
+        maxReceiveCount: 3
+
+  SmsChannelDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-sms-dlq-${sls:stage}
+      MessageRetentionPeriod: 1209600  # 14 days

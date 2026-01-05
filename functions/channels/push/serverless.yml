@@ -1,0 +1,13 @@
+pushChannelHandler:
+  handler: functions/channels/push/push_handlers.handler
+  name: haul-svc-notifications-push-channel-${sls:stage}
+  description: Push notification channel (STUB - Phase 2)
+  memorySize: 256
+  timeout: 30
+  events:
+    - sqs:
+        arn:
+          Fn::GetAtt:
+            - PushChannelQueue
+            - Arn
+        batchSize: 10

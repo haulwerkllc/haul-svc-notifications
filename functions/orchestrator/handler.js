@@ -1,0 +1,463 @@
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
+const { validateNotificationEvent } = require('../../utils/schema');
+const { getResolver } = require('./resolvers/registry');
+
+const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
+const docClient = DynamoDBDocumentClient.from(dynamoClient);
+const sqsClient = new SQSClient({ region: process.env.REGION });
+
+const NOTIFICATION_PREFERENCE_TABLE = process.env.NOTIFICATION_PREFERENCE_TABLE_NAME;
+const NOTIFICATION_INBOX_TABLE = process.env.NOTIFICATION_INBOX_TABLE_NAME;
+const JOB_TABLE = `Job-${process.env.ENV}`;
+const EMAIL_QUEUE_URL = process.env.EMAIL_QUEUE_URL;
+const PUSH_QUEUE_URL = process.env.PUSH_QUEUE_URL;
+const SMS_QUEUE_URL = process.env.SMS_QUEUE_URL;
+
+/**
+ * Notifications Orchestrator Lambda
+ * 
+ * Responsibilities:
+ * - Consume EventBridge events
+ * - Validate the ingress payload
+ * - Resolve recipients (explicit users or service-area providers)
+ * - Load user notification preferences
+ * - Determine eligible channels
+ * - Always write a notification record to NotificationInbox
+ * - Enqueue email messages to the EmailChannel SQS queue when email is enabled
+ */
+exports.handler = async (event) => {
+  console.log('[Orchestrator] Received EventBridge event', JSON.stringify(event, null, 2));
+
+  try {
+    // Extract the detail payload
+    const notificationEvent = event.detail;
+
+    // Validate the canonical ingress schema
+    const validation = validateNotificationEvent(notificationEvent);
+    if (!validation.valid) {
+      console.error('[Orchestrator] Schema validation failed', {
+        errors: validation.errors,
+        event_id: notificationEvent.event_id
+      });
+      throw new Error(`Schema validation failed: ${validation.errors.join(', ')}`);
+    }
+
+    console.log('[Orchestrator] Event validated successfully', {
+      event_id: notificationEvent.event_id,
+      event_type: notificationEvent.event_type
+    });
+
+    // Resolve recipients using event-type-specific resolver
+    const resolver = getResolver(notificationEvent.event_type);
+    if (!resolver) {
+      console.warn('[Orchestrator] No resolver found for event type', {
+        event_type: notificationEvent.event_type,
+        event_id: notificationEvent.event_id
+      });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: 'No resolver for event type', skipped: true })
+      };
+    }
+
+    const recipients = await resolver.resolve(notificationEvent);
+    console.log('[Orchestrator] Recipients resolved', {
+      event_id: notificationEvent.event_id,
+      count: recipients.length
+    });
+
+    if (recipients.length === 0) {
+      console.info('[Orchestrator] No recipients to notify (resolver returned empty list)');
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: 'No recipients', skipped: true })
+      };
+    }
+
+    // Process each recipient
+    for (const recipient of recipients) {
+      await processRecipient(recipient, notificationEvent);
+    }
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: 'Notifications orchestrated successfully',
+        event_id: notificationEvent.event_id,
+        recipients_count: recipients.length
+      })
+    };
+  } catch (error) {
+    console.error('[Orchestrator] Error processing event', {
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+};
+
+/**
+ * Process a single recipient
+ * - Load entity data and construct notification content
+ * - Load notification preferences
+ * - Write to NotificationInbox
+ * - Enqueue to enabled channels
+ */
+async function processRecipient(recipient, event) {
+  const userId = recipient.user_id;
+
+  console.log('[Orchestrator] Processing recipient', {
+    user_id: userId,
+    event_type: event.event_type,
+    event_id: event.event_id
+  });
+
+  // Construct notification content based on event type and entity data
+  const notificationContent = await constructNotificationContent(event);
+
+  // Load user notification preferences
+  const preferences = await loadNotificationPreferences(userId);
+
+  // Determine which channels are enabled for this event type
+  const enabledChannels = determineEnabledChannels(event.event_type, preferences);
+
+  console.log('[Orchestrator] Enabled channels for recipient', {
+    user_id: userId,
+    enabled_channels: enabledChannels
+  });
+
+  // Always write to NotificationInbox (regardless of channel preferences)
+  // Returns the generated notification_id and timestamp
+  const { notificationId, timestamp } = await writeToInbox(userId, event, enabledChannels, notificationContent);
+
+  // Enqueue to each enabled channel
+  for (const channel of enabledChannels) {
+    await enqueueToChannel(channel, userId, event, notificationId, timestamp, recipient.metadata, notificationContent);
+  }
+}
+
+/**
+ * Load job data from DynamoDB
+ */
+async function loadJobData(jobId) {
+  try {
+    const result = await docClient.send(new GetCommand({
+      TableName: JOB_TABLE,
+      Key: { id: jobId }
+    }));
+
+    if (!result.Item) {
+      console.warn('[Orchestrator] Job not found', { job_id: jobId });
+      return null;
+    }
+
+    return result.Item;
+  } catch (error) {
+    console.error('[Orchestrator] Error loading job data', {
+      job_id: jobId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Construct notification content based on event type
+ * Loads entity data and builds subject/body for user-facing notification
+ */
+async function constructNotificationContent(event) {
+  const { event_type, entity } = event;
+
+  switch (event_type) {
+    case 'haul.job.posted':
+      return await constructJobPostedNotification(entity.id);
+    
+    // Future event types will be added here:
+    // case 'haul.job.canceled':
+    //   return await constructJobCanceledNotification(entity.id);
+    // case 'haul.job.closed':
+    //   return await constructJobClosedNotification(entity.id);
+    // case 'haul.bid.created':
+    //   return await constructBidCreatedNotification(entity.id);
+    // case 'haul.booking.created':
+    //   return await constructBookingCreatedNotification(entity.id);
+    
+    default:
+      console.warn('[Orchestrator] No content constructor for event type', { event_type });
+      return {
+        subject: 'New notification',
+        body: `You have a new ${event_type} notification.`,
+        entity: {
+          id: entity.id,
+          type: entity.type
+        }
+      };
+  }
+}
+
+/**
+ * Construct notification content for haul.job.posted events
+ */
+async function constructJobPostedNotification(jobId) {
+  const job = await loadJobData(jobId);
+
+  if (!job) {
+    // Fallback if job not found
+    return {
+      subject: 'New job available in your service area',
+      body: 'A new job has been posted in your service area.',
+      entity: {
+        id: jobId,
+        type: 'job'
+      }
+    };
+  }
+
+  // Extract job attributes
+  const jobType = job.job_type || 'hauling';
+  const propertyType = job.property_type || 'property';
+  const timingPreference = job.timing_preference || 'Not specified';
+  
+  // Build human-readable address
+  const serviceAddress = job.service_address 
+    ? formatAddress(job.service_address)
+    : 'Location not specified';
+
+  // Build subject line
+  const subject = 'New job available in your service area';
+
+  // Build notification body with available details
+  const bodyParts = [
+    `A new ${jobType} job has been posted near you.`,
+    '',
+    `Property type: ${propertyType}`,
+    `Location: ${serviceAddress}`,
+    `Timing: ${timingPreference}`
+  ];
+
+  // Add additional context if available
+  if (job.description) {
+    bodyParts.push('');
+    bodyParts.push('Details:');
+    bodyParts.push(job.description.substring(0, 200) + (job.description.length > 200 ? '...' : ''));
+  }
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: jobId,
+      type: 'job'
+    },
+    // Include raw data for deep linking or custom rendering
+    data: {
+      job_type: job.job_type,
+      property_type: job.property_type,
+      service_location: job.service_location,
+      service_address: job.service_address,
+      timing_preference: job.timing_preference
+    }
+  };
+}
+
+/**
+ * Format address object into human-readable string
+ */
+function formatAddress(address) {
+  if (typeof address === 'string') {
+    return address;
+  }
+
+  if (!address) {
+    return 'Location not specified';
+  }
+
+  const parts = [];
+  
+  if (address.street) parts.push(address.street);
+  if (address.city) parts.push(address.city);
+  if (address.state) parts.push(address.state);
+  if (address.zip) parts.push(address.zip);
+
+  return parts.length > 0 ? parts.join(', ') : 'Location not specified';
+}
+
+/**
+ * Load notification preferences for a user
+ * Returns default preferences if none exist
+ */
+async function loadNotificationPreferences(userId) {
+  try {
+    const result = await docClient.send(new QueryCommand({
+      TableName: NOTIFICATION_PREFERENCE_TABLE,
+      KeyConditionExpression: 'pk = :pk',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`
+      }
+    }));
+
+    if (result.Items && result.Items.length > 0) {
+      return result.Items[0];
+    }
+
+    // Return default preferences
+    return {
+      user_id: userId,
+      email_enabled: true,
+      push_enabled: false,
+      sms_enabled: false
+    };
+  } catch (error) {
+    console.error('[Orchestrator] Error loading preferences', {
+      user_id: userId,
+      error: error.message
+    });
+
+    // Return default preferences on error
+    return {
+      user_id: userId,
+      email_enabled: true,
+      push_enabled: false,
+      sms_enabled: false
+    };
+  }
+}
+
+/**
+ * Determine which channels are enabled for a given event type and user preferences
+ */
+function determineEnabledChannels(eventType, preferences) {
+  const channels = [];
+
+  // Email: enabled by default unless explicitly disabled
+  if (preferences.email_enabled !== false) {
+    channels.push('email');
+  }
+
+  // Push: must be explicitly enabled (Phase 2)
+  if (preferences.push_enabled === true) {
+    channels.push('push');
+  }
+
+  // SMS: must be explicitly enabled (Phase 3)
+  if (preferences.sms_enabled === true) {
+    channels.push('sms');
+  }
+
+  return channels;
+}
+
+/**
+ * Write notification record to NotificationInbox
+ * notification_id is generated by this service and is the primary identifier
+ * event_id is a foreign reference to the originating domain event
+ */
+async function writeToInbox(userId, event, channels, notificationContent) {
+  const timestamp = new Date().toISOString();
+  const notificationId = `${Date.now()}#${Math.random().toString(36).substring(7)}`;
+
+  const item = {
+    pk: `USER#${userId}`,
+    sk: `NOTIF#${timestamp}#${notificationId}`,
+    user_id: userId,
+    notification_id: notificationId,
+    event_id: event.event_id,
+    event_type: event.event_type,
+    entity_type: event.entity.type,
+    entity_id: event.entity.id,
+    occurred_at: event.occurred_at,
+    created_at: timestamp,
+    subject: notificationContent.subject,
+    body: notificationContent.body,
+    data: notificationContent.data || {},
+    channels: channels,
+    delivery_status: {
+      email: channels.includes('email') ? 'pending' : 'not_applicable',
+      push: channels.includes('push') ? 'pending' : 'not_applicable',
+      sms: channels.includes('sms') ? 'pending' : 'not_applicable'
+    },
+    read: false,
+    context: event.context || {},
+    gsi1pk: `USER#${userId}`,
+    gsi1sk: `UNREAD#${timestamp}`
+  };
+
+  try {
+    await docClient.send(new PutCommand({
+      TableName: NOTIFICATION_INBOX_TABLE,
+      Item: item
+    }));
+
+    console.log('[Orchestrator] Wrote to inbox', {
+      user_id: userId,
+      notification_id: notificationId,
+      event_type: event.event_type
+    });
+
+    return { notificationId, timestamp };
+  } catch (error) {
+    console.error('[Orchestrator] Error writing to inbox', {
+      user_id: userId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Enqueue message to a specific channel queue
+ * notification_id is included so channels can update delivery status correctly
+ * Includes constructed notification content (subject, body) for delivery
+ */
+async function enqueueToChannel(channel, userId, event, notificationId, timestamp, metadata, notificationContent) {
+  const queueUrls = {
+    email: EMAIL_QUEUE_URL,
+    push: PUSH_QUEUE_URL,
+    sms: SMS_QUEUE_URL
+  };
+
+  const queueUrl = queueUrls[channel];
+  if (!queueUrl) {
+    console.warn('[Orchestrator] No queue URL for channel', { channel });
+    return;
+  }
+
+  const message = {
+    user_id: userId,
+    notification_id: notificationId,
+    notification_timestamp: timestamp,
+    event_id: event.event_id,
+    event_type: event.event_type,
+    entity_type: event.entity.type,
+    entity_id: event.entity.id,
+    occurred_at: event.occurred_at,
+    subject: notificationContent.subject,
+    body: notificationContent.body,
+    data: notificationContent.data || {},
+    context: event.context || {},
+    metadata: metadata || {}
+  };
+
+  try {
+    await sqsClient.send(new SendMessageCommand({
+      QueueUrl: queueUrl,
+      MessageBody: JSON.stringify(message)
+    }));
+
+    console.log('[Orchestrator] Enqueued to channel', {
+      channel,
+      user_id: userId,
+      notification_id: notificationId,
+      event_type: event.event_type
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Error enqueuing to channel', {
+      channel,
+      user_id: userId,
+      error: error.message
+    });
+    throw error;
+  }
+}
