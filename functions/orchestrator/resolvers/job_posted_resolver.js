@@ -1,11 +1,9 @@
 const NotificationResolver = require('./base');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
 const { Client } = require('@opensearch-project/opensearch');
 const { defaultProvider } = require('@aws-sdk/credential-provider-node');
-const { SignatureV4 } = require('@aws-sdk/signature-v4');
-const { HttpRequest } = require('@aws-sdk/protocol-http');
-const { Sha256 } = require('@aws-crypto/sha256-js');
+const { resolveUsersByCompanyRole } = require('../../../utils/company-role-lookup');
 
 const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
@@ -13,7 +11,6 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient, {
 });
 
 const JOB_TABLE = process.env.JOB_TABLE_NAME;
-const COMPANY_ROLE_TABLE = process.env.COMPANY_ROLE_TABLE_NAME;
 const OPENSEARCH_ENDPOINT = process.env.OPENSEARCH_ENDPOINT;
 
 // Roles eligible to receive job notifications
@@ -104,8 +101,13 @@ class JobPostedResolver extends NotificationResolver {
         company_ids: companyIds
       });
 
-      // Step 5: Resolve users by company role
-      const recipients = await this.resolveUsersByCompanyRole(companyIds);
+      // Step 5: Resolve users by company role using shared helper
+      const recipients = await resolveUsersByCompanyRole({
+        companyIds,
+        eligibleRoles: ELIGIBLE_ROLES,
+        includeMetadata: true,
+        logPrefix: 'JobPostedResolver'
+      });
 
       console.log('[JobPostedResolver] Resolved recipients', {
         job_id: jobId,
@@ -216,102 +218,6 @@ class JobPostedResolver extends NotificationResolver {
 
   toRadians(degrees) {
     return degrees * (Math.PI / 180);
-  }
-
-  /**
-   * Resolve users by querying CompanyRole table
-   * Returns users with OWNER, ADMIN, or DISPATCHER roles
-   */
-  async resolveUsersByCompanyRole(companyIds) {
-    const recipients = [];
-    const seenUserIds = new Set();
-
-    for (const companyId of companyIds) {
-      try {
-        console.log('[JobPostedResolver] Querying CompanyRole table', {
-          table: COMPANY_ROLE_TABLE,
-          index: 'companyId-index',
-          company_id: companyId
-        });
-
-        const result = await docClient.send(new QueryCommand({
-          TableName: COMPANY_ROLE_TABLE,
-          IndexName: 'companyId-index',
-          KeyConditionExpression: 'company_id = :company_id',
-          ExpressionAttributeValues: {
-            ':company_id': companyId
-          }
-        }));
-
-        const items = result.Items || [];
-
-        console.log('[JobPostedResolver] CompanyRole query result', {
-          company_id: companyId,
-          total_items_found: items.length,
-          items: items.map(item => ({ user_id: item.user_id, roles: item.roles, status: item.status }))
-        });
-
-        // Filter for eligible users (status active and has at least one eligible role)
-        const eligibleUsers = items.filter(item => {
-          if (item.status !== 'ACTIVE') return false;
-          
-          // Debug logging to inspect roles structure
-          console.log('[JobPostedResolver] Inspecting roles for user', {
-            user_id: item.user_id,
-            roles_raw: item.roles,
-            roles_type: typeof item.roles,
-            is_array: Array.isArray(item.roles),
-            is_set: item.roles instanceof Set,
-            constructor_name: item.roles?.constructor?.name
-          });
-          
-          // Check if item.roles array contains any eligible role
-          const userRoles = item.roles instanceof Set ? Array.from(item.roles) : (Array.isArray(item.roles) ? item.roles : (item.roles ? [item.roles] : []));
-          
-          console.log('[JobPostedResolver] Converted roles', {
-            user_id: item.user_id,
-            userRoles,
-            userRoles_length: userRoles.length
-          });
-          
-          return userRoles.some(role => ELIGIBLE_ROLES.includes(role));
-        });
-
-        console.log('[JobPostedResolver] Eligible users for company', {
-          company_id: companyId,
-          eligible_count: eligibleUsers.length,
-          eligible_users: eligibleUsers.map(item => ({ user_id: item.user_id, roles: item.roles }))
-        });
-
-        // Add to recipients list (deduped)
-        for (const item of eligibleUsers) {
-          if (!seenUserIds.has(item.user_id)) {
-            seenUserIds.add(item.user_id);
-            
-            // Find the highest priority role for metadata
-            const userRoles = item.roles instanceof Set ? Array.from(item.roles) : (Array.isArray(item.roles) ? item.roles : [item.roles]);
-            const eligibleRole = userRoles.find(r => ELIGIBLE_ROLES.includes(r)) || userRoles[0];
-            
-            recipients.push({
-              user_id: item.user_id,
-              metadata: {
-                company_id: companyId,
-                roles: userRoles,
-                primary_role: eligibleRole
-              }
-            });
-          }
-        }
-      } catch (error) {
-        console.error('[JobPostedResolver] Error querying company roles', {
-          company_id: companyId,
-          error: error.message
-        });
-        // Continue with other companies
-      }
-    }
-
-    return recipients;
   }
 
   /**

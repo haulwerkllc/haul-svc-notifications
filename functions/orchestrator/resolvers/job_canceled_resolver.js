@@ -1,6 +1,7 @@
 const NotificationResolver = require('./base');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { resolveUsersByCompanyRole } = require('../../../utils/company-role-lookup');
 
 const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
@@ -8,7 +9,6 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient, {
 });
 
 const BID_TABLE = process.env.BID_TABLE_NAME;
-const COMPANY_ROLE_TABLE = process.env.COMPANY_ROLE_TABLE_NAME;
 
 // Roles that should receive job cancellation notifications
 const NOTIFIABLE_ROLES = ['OWNER', 'ADMIN', 'DISPATCHER'];
@@ -77,15 +77,13 @@ class JobCanceledResolver extends NotificationResolver {
         company_ids: companyIds
       });
 
-      // Get notifiable users from each company
-      const userIds = new Set();
-      
-      for (const companyId of companyIds) {
-        const users = await this.getNotifiableUsersForCompany(companyId);
-        users.forEach(userId => userIds.add(userId));
-      }
-
-      const recipients = Array.from(userIds).map(user_id => ({ user_id }));
+      // Get notifiable users from companies using shared helper
+      const recipients = await resolveUsersByCompanyRole({
+        companyIds,
+        eligibleRoles: NOTIFIABLE_ROLES,
+        includeMetadata: false,
+        logPrefix: 'JobCanceledResolver'
+      });
 
       console.log('[JobCanceledResolver] Resolved recipients', {
         job_id: jobId,
@@ -120,28 +118,6 @@ class JobCanceledResolver extends NotificationResolver {
     }));
 
     return result.Items || [];
-  }
-
-  /**
-   * Get users with OWNER, ADMIN, or DISPATCHER roles for a company
-   */
-  async getNotifiableUsersForCompany(companyId) {
-    const result = await docClient.send(new QueryCommand({
-      TableName: COMPANY_ROLE_TABLE,
-      IndexName: 'companyId-index',
-      KeyConditionExpression: 'company_id = :companyId',
-      ExpressionAttributeValues: {
-        ':companyId': companyId
-      }
-    }));
-
-    const roles = result.Items || [];
-    
-    // Filter to notifiable roles and extract user_ids
-    return roles
-      .filter(role => NOTIFIABLE_ROLES.includes(role.role) && role.status === 'ACTIVE')
-      .map(role => role.user_id)
-      .filter(Boolean);
   }
 }
 

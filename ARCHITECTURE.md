@@ -63,6 +63,85 @@ Always reference this first before creating discrete env variables in lambdas.
 
 ---
 
+## Critical Data Model Context
+
+### CompanyRole Table Structure
+
+The `CompanyRole` table defines user membership and permissions within a company.
+
+**CRITICAL:** Each `CompanyRole` item represents a single user's membership in a company and contains a `roles` field that defines **ALL assigned roles** for that user within that company.
+
+```javascript
+// CompanyRole item structure
+{
+  id: "uuid",
+  company_id: "uuid",
+  user_id: "uuid",
+  roles: ["OWNER", "ADMIN"],  // ALL roles assigned to this user in this company
+  status: "ACTIVE" | "INACTIVE",
+  created_at: "ISO-8601",
+  updated_at: "ISO-8601"
+}
+```
+
+**Valid role values:** `OWNER`, `ADMIN`, `DISPATCHER`, `DRIVER`
+
+**DynamoDB Type Handling:** The `roles` field may be returned as:
+- A JavaScript `Set` (when stored as DynamoDB String Set `SS`)
+- A JavaScript `Array` (when stored as DynamoDB List `L`)
+- A single string value (edge case)
+
+**When querying for users with specific roles:**
+```javascript
+// CORRECT: Normalize roles and check for target roles
+const userRoles = record.roles instanceof Set
+  ? Array.from(record.roles)
+  : (Array.isArray(record.roles) ? record.roles : (record.roles ? [record.roles] : []));
+
+const hasNotifiableRole = userRoles.some(role => 
+  ['OWNER', 'ADMIN', 'DISPATCHER'].includes(role)
+);
+
+// WRONG: Do not assume a single `role` attribute
+// record.role === 'ADMIN'  // ❌ INCORRECT - attribute is `roles` (plural)
+
+// WRONG: Do not assume roles is always an array
+// record.roles.some(...)  // ❌ May fail if roles is a Set
+```
+
+### Shared Helper: resolveUsersByCompanyRole
+
+Location: `utils/company-role-lookup.js`
+
+**ALWAYS use this helper when resolving company users for notifications.** It handles:
+- Normalizing `roles` field (Set, Array, or single value)
+- Querying by `companyId-index` GSI
+- Deduplicating users across multiple companies
+- Filtering by ACTIVE status
+
+```javascript
+const { resolveUsersByCompanyRole } = require('../../../utils/company-role-lookup');
+
+// Simple usage - returns [{ user_id: 'xxx' }, ...]
+const recipients = await resolveUsersByCompanyRole({
+  companyIds: ['company-1', 'company-2'],  // Array or single string
+  eligibleRoles: ['OWNER', 'ADMIN', 'DISPATCHER'],
+  includeMetadata: false,  // Optional, default false
+  logPrefix: 'MyResolver'  // Optional, for log context
+});
+
+// With metadata - returns [{ user_id, metadata: { company_id, roles, primary_role } }, ...]
+const recipients = await resolveUsersByCompanyRole({
+  companyIds: 'single-company-id',
+  eligibleRoles: ['OWNER', 'ADMIN'],
+  includeMetadata: true
+});
+```
+
+**Do NOT reimplement this logic in individual resolvers.**
+
+---
+
 ## Notifications Service Terraform (Service-local)
 
 This service owns:
