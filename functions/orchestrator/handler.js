@@ -179,6 +179,12 @@ async function constructNotificationContent(event) {
     case 'haul.job.posted':
       return await constructJobPostedNotification(entity.id);
     
+    case 'haul.job.canceled':
+      return await constructJobCanceledNotification(entity.id);
+    
+    case 'haul.job.closed':
+      return await constructJobClosedNotification(entity.id);
+    
     case 'haul.bid.created':
       return await constructBidCreatedNotification(entity.id);
     
@@ -186,10 +192,6 @@ async function constructNotificationContent(event) {
       return await constructBidUpdatedNotification(entity.id);
     
     // Future event types will be added here:
-    // case 'haul.job.canceled':
-    //   return await constructJobCanceledNotification(entity.id);
-    // case 'haul.job.closed':
-    //   return await constructJobClosedNotification(entity.id);
     // case 'haul.booking.created':
     //   return await constructBookingCreatedNotification(entity.id);
     
@@ -266,7 +268,11 @@ async function constructJobPostedNotification(jobId) {
       property_type: job.property_type,
       service_location: job.service_location,
       service_address: job.service_address,
-      timing_preference: job.timing_preference
+      timing_preference: job.timing_preference,
+      preferred_pickup_window_start: job.preferred_pickup_window_start,
+      preferred_pickup_window_end: job.preferred_pickup_window_end,
+      bidding_closes_at: job.bidding_closes_at,
+      service_location_timezone: job.service_location_timezone
     }
   };
 }
@@ -620,6 +626,194 @@ async function constructBidUpdatedNotification(bidId) {
       notes: bid.notes
     }
   };
+}
+
+/**
+ * Construct notification content for haul.job.canceled events
+ * Recipients: Service providers with open bids
+ */
+async function constructJobCanceledNotification(jobId) {
+  const job = await loadJobData(jobId);
+
+  if (!job) {
+    return {
+      subject: 'A job you bid on was canceled',
+      body: 'A job you submitted a bid on has been canceled by the customer.',
+      entity: { id: jobId, type: 'job' }
+    };
+  }
+
+  // Format job details
+  const jobType = formatJobTypeForServiceProvider(job.job_type);
+  const serviceAddress = job.service_address 
+    ? formatAddress(job.service_address)
+    : 'Location not specified';
+
+  const subject = 'A job you bid on was canceled';
+
+  const bodyParts = [
+    `The ${jobType} job you submitted a bid on has been canceled by the customer.`,
+    '',
+    `Location: ${serviceAddress}`
+  ];
+
+  if (job.description) {
+    bodyParts.push('');
+    bodyParts.push(`Job details: ${job.description.substring(0, 100)}${job.description.length > 100 ? '...' : ''}`);
+  }
+
+  bodyParts.push('');
+  bodyParts.push('No further action is required. Your bid has been automatically withdrawn.');
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: jobId,
+      type: 'job'
+    },
+    data: {
+      job_id: jobId,
+      job_type: job.job_type,
+      job_type_formatted: jobType,
+      service_address: job.service_address,
+      location_formatted: serviceAddress,
+      description: job.description
+    }
+  };
+}
+
+/**
+ * Format job type for service provider display
+ */
+function formatJobTypeForServiceProvider(jobType) {
+  const map = {
+    'JUNK_REMOVAL': 'junk removal',
+    'MOVE_SMALL': 'small move'
+  };
+  return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
+}
+
+/**
+ * Construct notification content for haul.job.closed events
+ * Recipients: Consumer who posted the job
+ * 
+ * Scenarios:
+ * A: Bidding closed, one or more OPEN bids exist
+ * B: Bidding closed, no bids exist
+ */
+async function constructJobClosedNotification(jobId) {
+  const job = await loadJobData(jobId);
+
+  if (!job) {
+    return {
+      subject: 'Bidding has closed on your job',
+      body: 'The bidding period for your job has ended.',
+      entity: { id: jobId, type: 'job' }
+    };
+  }
+
+  // Query open bids for this job
+  const openBids = await queryOpenBidsForJob(jobId);
+  const bidCount = openBids.length;
+
+  // Format job details
+  const jobType = formatJobTypeForConsumer(job.job_type);
+  const serviceAddress = job.service_address 
+    ? formatAddress(job.service_address)
+    : 'Your job location';
+
+  // Determine scenario
+  const hasQuotes = bidCount > 0;
+  const scenario = hasQuotes ? 'A' : 'B';
+
+  console.log('[Orchestrator] Job closed scenario', {
+    job_id: jobId,
+    bid_count: bidCount,
+    scenario
+  });
+
+  if (hasQuotes) {
+    // Scenario A: Quotes received
+    const quoteText = bidCount === 1 ? '1 quote' : `${bidCount} quotes`;
+    
+    return {
+      subject: `You have ${quoteText} to review`,
+      body: [
+        `The bidding period for your ${jobType} job has ended.`,
+        '',
+        `You received ${quoteText}. Review and select a quote to book your service.`,
+        '',
+        `Location: ${serviceAddress}`
+      ].join('\n'),
+      entity: {
+        id: jobId,
+        type: 'job'
+      },
+      data: {
+        job_id: jobId,
+        job_type: job.job_type,
+        job_type_formatted: jobType,
+        service_address: job.service_address,
+        location_formatted: serviceAddress,
+        bid_count: bidCount,
+        scenario: 'A'
+      }
+    };
+  } else {
+    // Scenario B: No quotes received
+    return {
+      subject: 'Your job did not receive any quotes',
+      body: [
+        `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
+        '',
+        `Location: ${serviceAddress}`,
+        '',
+        'This can happen when providers in your area are at capacity. You can repost your job to try again.'
+      ].join('\n'),
+      entity: {
+        id: jobId,
+        type: 'job'
+      },
+      data: {
+        job_id: jobId,
+        job_type: job.job_type,
+        job_type_formatted: jobType,
+        service_address: job.service_address,
+        location_formatted: serviceAddress,
+        bid_count: 0,
+        scenario: 'B'
+      }
+    };
+  }
+}
+
+/**
+ * Query open bids for a job using GSI jobId-status-index
+ */
+async function queryOpenBidsForJob(jobId) {
+  try {
+    const result = await docClient.send(new QueryCommand({
+      TableName: BID_TABLE,
+      IndexName: 'jobId-status-index',
+      KeyConditionExpression: 'job_id = :jobId AND #status = :status',
+      ExpressionAttributeNames: {
+        '#status': 'status'
+      },
+      ExpressionAttributeValues: {
+        ':jobId': jobId,
+        ':status': 'OPEN'
+      }
+    }));
+
+    return result.Items || [];
+  } catch (error) {
+    console.error('[Orchestrator] Error querying open bids', {
+      job_id: jobId,
+      error: error.message
+    });
+    return [];
+  }
 }
 
 /**

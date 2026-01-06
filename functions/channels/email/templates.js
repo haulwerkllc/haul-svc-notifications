@@ -394,6 +394,8 @@ function buildJobPostedEmail(jobData) {
     jobData.preferred_pickup_window_end
   );
   const location = formatAddress(jobData.service_address);
+  const timezone = jobData.service_location_timezone;
+  const biddingClosesAt = jobData.bidding_closes_at ? formatBiddingDeadline(jobData.bidding_closes_at, timezone) : null;
   
   const subject = `New ${jobType} job available`;
   const preheader = `${propertyType} in your service area`;
@@ -419,6 +421,8 @@ function buildJobPostedEmail(jobData) {
     
     ${jobData.description ? `<p>${escapeHtml(jobData.description.substring(0, 200))}${jobData.description.length > 200 ? '...' : ''}</p>` : ''}
     
+    ${biddingClosesAt ? `<p>This job is open for bids until ${escapeHtml(biddingClosesAt)}.</p>` : ''}
+    
     <div class="cta">
       <a href="${DISPATCHER_BASE_URL}/dashboard/jobs" class="cta-button">Place your bid</a>
     </div>
@@ -439,7 +443,12 @@ function buildJobPostedEmail(jobData) {
     textParts.push('');
     textParts.push(jobData.description.substring(0, 200) + (jobData.description.length > 200 ? '...' : ''));
   }
-  
+
+  if (biddingClosesAt) {
+    textParts.push('');
+    textParts.push(`This job is open for bids until ${biddingClosesAt}.`);
+  }
+
   textParts.push('');
   textParts.push(`Place your bid: ${DISPATCHER_BASE_URL}/dashboard/jobs`);
   textParts.push('');
@@ -474,8 +483,8 @@ function buildBidCreatedEmail(data) {
   const timezone = data.service_location_timezone;
   const biddingClosesAt = data.bidding_closes_at ? formatBiddingDeadline(data.bidding_closes_at, timezone) : 'the deadline';
   
-  const subject = 'You received a new bid on your job';
-  const preheader = `${companyName} submitted a ${bidAmount} bid`;
+  const subject = 'You received a new quote on your job';
+  const preheader = `${companyName} submitted a ${bidAmount} quote`;
   
   // Company logo (if available)
   const companyLogoHtml = companyLogoUrl 
@@ -483,14 +492,14 @@ function buildBidCreatedEmail(data) {
     : '';
   
   const bodyContent = `
-    <h1>New bid received</h1>
-    <p>${escapeHtml(companyName)} has submitted a bid on your ${escapeHtml(jobType)} job.</p>
+    <h1>New quote received</h1>
+    <p>${escapeHtml(companyName)} has submitted a quote on your ${escapeHtml(jobType)} job.</p>
     
     ${companyLogoHtml}
     
     <div style="margin: 24px 0;">
       <div class="detail-row">
-        <span class="detail-label">Bid amount</span>
+        <span class="detail-label">Quoted amount</span>
         <span class="detail-value" style="font-weight: 600;">${escapeHtml(bidAmount)}</span>
       </div>
       <div class="detail-row">
@@ -509,20 +518,20 @@ function buildBidCreatedEmail(data) {
     
     ${notes ? `<p style="margin: 16px 0; padding: 12px; background-color: #f9fafb; border-radius: 6px; font-size: 14px;"><strong>Provider notes:</strong> ${escapeHtml(notes)}</p>` : ''}
     
-    <p>To book your service, review and select a bid by ${escapeHtml(biddingClosesAt)} in the Haul app.</p>
+    <p>To book your service, review and select a quote by ${escapeHtml(biddingClosesAt)} in the Haul app.</p>
     
     <div class="cta">
-      <a href="${BASE_URL}/bids/${bidId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review bid</a>
+      <a href="${BASE_URL}/bids/${bidId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review quote</a>
     </div>
   `;
   
   // Plain text version
   const textParts = [
-    'New bid received',
+    'New quote received',
     '',
-    `${companyName} has submitted a bid on your ${jobType} job.`,
+    `${companyName} has submitted a quote on your ${jobType} job.`,
     '',
-    `Bid amount: ${bidAmount}`,
+    `Quoted amount: ${bidAmount}`,
     `Company: ${companyName}`,
     `Location: ${location}`,
     `Service window: ${pickupWindow}`
@@ -534,9 +543,9 @@ function buildBidCreatedEmail(data) {
   }
   
   textParts.push('');
-  textParts.push(`To book your service, review and select a bid by ${biddingClosesAt} in the Haul app.`);
+  textParts.push(`To book your service, review and select a quote by ${biddingClosesAt} in the Haul app.`);
   textParts.push('');
-  textParts.push(`Review bid: ${BASE_URL}/bids/${bidId}`);
+  textParts.push(`Review quote: ${BASE_URL}/bids/${bidId}`);
   textParts.push('');
   textParts.push('---');
   textParts.push('You received this because you posted a job on Haul.');
@@ -569,8 +578,8 @@ function buildBidUpdatedEmail(data) {
   const timezone = data.service_location_timezone;
   const biddingClosesAt = data.bidding_closes_at ? formatBiddingDeadline(data.bidding_closes_at, timezone) : 'the deadline';
   
-  const subject = 'A bid on your job was updated';
-  const preheader = `${companyName} updated their bid to ${bidAmount}`;
+  const subject = 'A quote on your job was updated';
+  const preheader = `${companyName} updated their quote to ${bidAmount}`;
   
   // Company logo (if available)
   const companyLogoHtml = companyLogoUrl 
@@ -578,14 +587,14 @@ function buildBidUpdatedEmail(data) {
     : '';
   
   const bodyContent = `
-    <h1>Bid updated</h1>
-    <p>${escapeHtml(companyName)} has updated their bid on your ${escapeHtml(jobType)} job.</p>
+    <h1>Quote updated</h1>
+    <p>${escapeHtml(companyName)} has updated their quote on your ${escapeHtml(jobType)} job.</p>
     
     ${companyLogoHtml}
     
     <div style="margin: 24px 0;">
       <div class="detail-row">
-        <span class="detail-label">Updated amount</span>
+        <span class="detail-label">Updated quote</span>
         <span class="detail-value" style="font-weight: 600;">${escapeHtml(bidAmount)}</span>
       </div>
       <div class="detail-row">
@@ -604,20 +613,20 @@ function buildBidUpdatedEmail(data) {
     
     ${notes ? `<p style="margin: 16px 0; padding: 12px; background-color: #f9fafb; border-radius: 6px; font-size: 14px;"><strong>Provider notes:</strong> ${escapeHtml(notes)}</p>` : ''}
     
-    <p>To book your service, review and select a bid by ${escapeHtml(biddingClosesAt)} in the Haul app.</p>
+    <p>To book your service, review and select a quote by ${escapeHtml(biddingClosesAt)} in the Haul app.</p>
     
     <div class="cta">
-      <a href="${BASE_URL}/bids/${bidId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review bid</a>
+      <a href="${BASE_URL}/bids/${bidId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review quote</a>
     </div>
   `;
   
   // Plain text version
   const textParts = [
-    'Bid updated',
+    'Quote updated',
     '',
-    `${companyName} has updated their bid on your ${jobType} job.`,
+    `${companyName} has updated their quote on your ${jobType} job.`,
     '',
-    `Updated amount: ${bidAmount}`,
+    `Updated quote: ${bidAmount}`,
     `Company: ${companyName}`,
     `Location: ${location}`,
     `Service window: ${pickupWindow}`
@@ -629,14 +638,212 @@ function buildBidUpdatedEmail(data) {
   }
   
   textParts.push('');
-  textParts.push(`To book your service, review and select a bid by ${biddingClosesAt} in the Haul app.`);
+  textParts.push(`To book your service, review and select a quote by ${biddingClosesAt} in the Haul app.`);
   textParts.push('');
-  textParts.push(`Review bid: ${BASE_URL}/bids/${bidId}`);
+  textParts.push(`Review quote: ${BASE_URL}/bids/${bidId}`);
   textParts.push('');
   textParts.push('---');
   textParts.push('You received this because you posted a job on Haul.');
   textParts.push(`Update preferences: ${BASE_URL}/user/preferences`);
   textParts.push(`Contact support: ${SUPPORT_EMAIL}`);
+  
+  return {
+    subject,
+    html: buildConsumerTemplate({
+      subject,
+      preheader,
+      bodyContent
+    }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build job canceled email for service providers
+ */
+function buildJobCanceledEmail(data) {
+  const jobType = data.job_type_formatted || 'hauling';
+  const location = data.location_formatted || 'Location not specified';
+  const description = data.description;
+  
+  const subject = 'A job you bid on was canceled';
+  const preheader = 'The customer has canceled this job';
+  
+  const bodyContent = `
+    <h1>Job canceled</h1>
+    <p>The ${escapeHtml(jobType)} job you submitted a bid on has been canceled by the customer.</p>
+    
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+    </div>
+    
+    ${description ? `<p style="margin: 16px 0; color: #6b7280; font-size: 14px;">${escapeHtml(description.substring(0, 100))}${description.length > 100 ? '...' : ''}</p>` : ''}
+    
+    <p>No further action is required. Your bid has been automatically withdrawn.</p>
+  `;
+  
+  // Plain text version
+  const textParts = [
+    'Job canceled',
+    '',
+    `The ${jobType} job you submitted a bid on has been canceled by the customer.`,
+    '',
+    `Location: ${location}`
+  ];
+  
+  if (description) {
+    textParts.push('');
+    textParts.push(description.substring(0, 100) + (description.length > 100 ? '...' : ''));
+  }
+  
+  textParts.push('');
+  textParts.push('No further action is required. Your bid has been automatically withdrawn.');
+  textParts.push('');
+  textParts.push('---');
+  textParts.push('You received this because you submitted a bid on this job.');
+  textParts.push(`Update preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`);
+  textParts.push(`Contact support: ${SUPPORT_EMAIL}`);
+  
+  return {
+    subject,
+    html: buildServiceProviderTemplate({
+      subject,
+      preheader,
+      bodyContent
+    }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build job closed email for consumers
+ * 
+ * Scenario A: Quotes received - prompt to select
+ * Scenario B: No quotes - apologetic, suggest reposting
+ */
+function buildJobClosedEmail(data) {
+  const jobType = data.job_type_formatted || 'hauling';
+  const location = data.location_formatted || 'Your job location';
+  const bidCount = data.bid_count || 0;
+  const jobId = data.job_id;
+  const scenario = data.scenario || (bidCount > 0 ? 'A' : 'B');
+  
+  if (scenario === 'A') {
+    return buildJobClosedWithQuotesEmail({ jobType, location, bidCount, jobId });
+  } else {
+    return buildJobClosedNoQuotesEmail({ jobType, location, jobId });
+  }
+}
+
+/**
+ * Scenario A: Job closed with quotes received
+ */
+function buildJobClosedWithQuotesEmail({ jobType, location, bidCount, jobId }) {
+  const quoteText = bidCount === 1 ? '1 quote' : `${bidCount} quotes`;
+  
+  const subject = `You have ${quoteText} to review`;
+  const preheader = 'Select a quote to book your service';
+  
+  const bodyContent = `
+    <h1>Review your quotes</h1>
+    <p>The quoting period for your ${escapeHtml(jobType)} job has ended.</p>
+    
+    <p style="margin: 24px 0; font-size: 16px; font-weight: 500;">You received ${escapeHtml(quoteText)}.</p>
+    
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+    </div>
+    
+    <p>Review your quotes and select one to book your service.</p>
+    
+    <div class="cta">
+      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review quotes</a>
+    </div>
+  `;
+  
+  // Plain text version
+  const textParts = [
+    'Review your quotes',
+    '',
+    `The quoting period for your ${jobType} job has ended.`,
+    '',
+    `You received ${quoteText}.`,
+    '',
+    `Location: ${location}`,
+    '',
+    'Review your quotes and select one to book your service.',
+    '',
+    `Review quotes: ${BASE_URL}/jobs/${jobId}`,
+    '',
+    '---',
+    'You received this because you posted a job on Haul.',
+    `Update preferences: ${BASE_URL}/user/preferences`,
+    `Contact support: ${SUPPORT_EMAIL}`
+  ];
+  
+  return {
+    subject,
+    html: buildConsumerTemplate({
+      subject,
+      preheader,
+      bodyContent
+    }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Scenario B: Job closed with no quotes received
+ */
+function buildJobClosedNoQuotesEmail({ jobType, location, jobId }) {
+  const subject = 'Your job did not receive any quotes';
+  const preheader = 'Consider reposting your job';
+  
+  const bodyContent = `
+    <h1>No quotes received</h1>
+    <p>Unfortunately, no service providers submitted quotes for your ${escapeHtml(jobType)} job.</p>
+    
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+    </div>
+    
+    <p>This can happen when providers in your area are at capacity or during high-demand periods.</p>
+    
+    <p>You can repost your job to try again, or adjust the timing to improve your chances of receiving quotes.</p>
+    
+    <div class="cta">
+      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View job</a>
+    </div>
+  `;
+  
+  // Plain text version
+  const textParts = [
+    'No quotes received',
+    '',
+    `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
+    '',
+    `Location: ${location}`,
+    '',
+    'This can happen when providers in your area are at capacity or during high-demand periods.',
+    '',
+    'You can repost your job to try again, or adjust the timing to improve your chances of receiving quotes.',
+    '',
+    `View job: ${BASE_URL}/jobs/${jobId}`,
+    '',
+    '---',
+    'You received this because you posted a job on Haul.',
+    `Update preferences: ${BASE_URL}/user/preferences`,
+    `Contact support: ${SUPPORT_EMAIL}`
+  ];
   
   return {
     subject,
@@ -668,6 +875,8 @@ module.exports = {
   buildServiceProviderTemplate,
   buildConsumerTemplate,
   buildJobPostedEmail,
+  buildJobCanceledEmail,
+  buildJobClosedEmail,
   buildBidCreatedEmail,
   buildBidUpdatedEmail,
   normalizeJobType,

@@ -1,7 +1,13 @@
 const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
-const { buildJobPostedEmail, buildBidCreatedEmail, buildBidUpdatedEmail } = require('./templates');
+const { 
+  buildJobPostedEmail, 
+  buildJobCanceledEmail,
+  buildJobClosedEmail,
+  buildBidCreatedEmail, 
+  buildBidUpdatedEmail 
+} = require('./templates');
 
 const sesClient = new SESv2Client({ region: process.env.REGION });
 const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
@@ -139,15 +145,17 @@ function renderEmailTemplate(eventType, data) {
     case 'haul.job.posted':
       return buildJobPostedEmail(data);
     
+    case 'haul.job.canceled':
+      return buildJobCanceledEmail(data);
+    
+    case 'haul.job.closed':
+      return buildJobClosedEmail(data);
+    
     case 'haul.bid.created':
       return buildBidCreatedEmail(data);
     
     case 'haul.bid.updated':
       return buildBidUpdatedEmail(data);
-    
-    // Future event types:
-    // case 'haul.job.canceled':
-    //   return buildJobCanceledEmail(data);
     
     default:
       console.warn('[EmailChannel] No template for event type, using fallback', { event_type: eventType });

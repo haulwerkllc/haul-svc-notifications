@@ -1,17 +1,22 @@
 const NotificationResolver = require('./base');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
+
+const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
+  marshallOptions: { removeUndefinedValues: true },
+});
+
+const JOB_TABLE = process.env.JOB_TABLE_NAME;
 
 /**
  * Resolver for haul.job.closed events
  * 
- * Recipients: The customer who posted the job
+ * Recipients: The consumer who posted the job
  * 
  * BOUNDARY: This resolver performs LOOKUP ONLY
  * - Returns user_id of job owner
  * - MUST NOT evaluate preferences, determine channels, or perform delivery
- * 
- * TODO: Implement job owner lookup
- * - Query DynamoDB Job table for the job
- * - Extract customer_user_id from job record
  */
 class JobClosedResolver extends NotificationResolver {
   getEventType() {
@@ -24,12 +29,50 @@ class JobClosedResolver extends NotificationResolver {
       entity_id: event.entity.id
     });
 
-    // TODO: Query DynamoDB for job details
-    // - Table: Job-${env}
-    // - Key: job_id = entity.id
-    // - Return: [{ user_id: job.customer_user_id }]
-    
-    return [];
+    const jobId = event.entity.id;
+
+    try {
+      // Lookup job record
+      const job = await this.getJob(jobId);
+      
+      if (!job) {
+        console.warn('[JobClosedResolver] Job not found', { job_id: jobId });
+        return [];
+      }
+
+      // Extract owner_user_id
+      const ownerUserId = job.owner_user_id;
+      
+      if (!ownerUserId) {
+        console.warn('[JobClosedResolver] Job has no owner_user_id', { job_id: jobId });
+        return [];
+      }
+
+      console.log('[JobClosedResolver] Resolved recipient', {
+        job_id: jobId,
+        owner_user_id: ownerUserId
+      });
+
+      return [{ user_id: ownerUserId }];
+    } catch (error) {
+      console.error('[JobClosedResolver] Error resolving recipients', {
+        job_id: jobId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get job by ID
+   */
+  async getJob(jobId) {
+    const result = await docClient.send(new GetCommand({
+      TableName: JOB_TABLE,
+      Key: { id: jobId }
+    }));
+
+    return result.Item || null;
   }
 }
 
