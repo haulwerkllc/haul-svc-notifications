@@ -9,6 +9,7 @@ const JobPostedResolver = require('./job_posted_resolver');
 const JobCanceledResolver = require('./job_canceled_resolver');
 const JobClosedResolver = require('./job_closed_resolver');
 const BidCreatedResolver = require('./bid_created_resolver');
+const BidUpdatedResolver = require('./bid_updated_resolver');
 const BookingCreatedResolver = require('./booking_created_resolver');
 
 // Initialize resolver instances
@@ -17,6 +18,7 @@ const resolvers = [
   new JobCanceledResolver(),
   new JobClosedResolver(),
   new BidCreatedResolver(),
+  new BidUpdatedResolver(),
   new BookingCreatedResolver()
 ];
 

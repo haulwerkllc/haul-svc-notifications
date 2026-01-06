@@ -89,6 +89,16 @@ events:PutEvents
 
 They do not know how notifications are delivered.
 
+### EventBridge Routing Rule
+
+A single EventBridge rule defined in central Terraform routes **all** `haul.*` events to the notifications orchestrator:
+
+```
+rule_name = "notifications-${var.env}"
+```
+
+This rule uses a wildcard pattern to match all events with a `detail-type` starting with `haul.`. No additional EventBridge rules are required when adding new event types — simply implement a resolver in the orchestrator.
+
 ---
 
 ## Runtime Architecture (Async Fan-out)
@@ -325,6 +335,132 @@ vpc:
 - OpenSearch permissions MUST be read-only: `es:ESHttpGet`
 
 OpenSearch is treated as a read-only lookup / cache, not a source of truth.
+
+---
+
+## Email templates
+
+Email templates are built programmatically in `/functions/channels/email/templates.js` using brand-compliant HTML.
+
+### Design Principles
+
+Per `brand-guidelines.md`:
+- Calm, competent, quietly confident
+- Short sentences, active voice
+- No exclamation points or emojis in core flows
+- Color is functional, not expressive
+- Practical and respectful of users' time
+
+### Template Types
+
+**Service Provider Templates**
+- Primary color (light theme): #171717
+- Logo: Black Haul wordmark (`haul_wordmark_icon_black.svg`)
+- Used for: job notifications, booking assignments, etc.
+
+**Consumer Templates**  
+- Primary color (light theme): #3a4a63
+- Logo: Charcoal Blue Haul wordmark (`haul_wordmark_icon_blue_char.svg`)
+- Used for: bid updates, booking confirmations, etc.
+
+### Template Structure
+
+Each template includes:
+1. **Header** - Haul logo (single use per email)
+2. **Body** - Event-specific content with structured details
+3. **CTA** - Single primary action button
+4. **Footer** - Why they received it, preference link, support contact
+
+### Template Return Format
+
+All email template functions MUST return an object with three properties:
+
+```javascript
+{
+  subject: string,  // Email subject line
+  html: string,     // HTML version of email body
+  text: string      // Plain text version of email body
+}
+```
+
+**Requirements:**
+- The `text` field is required by Amazon SES and must mirror the HTML content
+- Plain text should include all key information, links, and footer content
+- Use line breaks (`\n`) and simple formatting for readability
+- Both HTML and text versions should convey the same information
+
+### Available Assets
+
+All assets are hosted at `https://cdn.haulwerk.com/images/`
+
+- Must conform to design guidelines in `.gpt-agents/designer.yaml`
+- Primary colors for service provider facing emails: 
+  - If LIGHT theme: #171717
+  - If DARK theme: #f9fafb
+- Primary colors for consumer facing emails: 
+  - If LIGHT theme: #3a4a63
+  - If DARK theme: #f9fafb  
+- Email templates may use the following assets exist across all environments:
+
+### Charcoal Blue Haul Icon
+- For use in CONSUMER facing emails
+- For use in LIGHT THEME email templates
+- Single Haul square brand icon
+- Does not contain wordmark treatment for "haul"
+- Square aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_icon_blue_char.svg`
+
+### Charcoal White Haul Icon
+- For use in CONSUMER facing emails
+- For use in DARK THEME email templates
+- Single Haul square brand icon
+- Does not contain wordmark treatment for "haul"
+- Square aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_icon_white_char.svg`
+
+### Charcoal Blue Haul Logo
+- For use in CONSUMER facing emails
+- For use in LIGHT THEME email templates
+- Single Haul square brand icon with "haul" wordmark
+- Landscape aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_wordmark_icon_blue_char.svg`
+
+### Charcoal White Haul Logo
+- For use in CONSUMER facing emails
+- For use in LIGHT THEME email templates
+- Single Haul square brand icon with "haul" wordmark
+- Landscape aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_wordmark_icon_white_char.svg`
+
+### Black Haul Icon
+- For use in SERVICE PROVIDER facing emails
+- For use in LIGHT THEME email templates
+- Single Haul square brand icon
+- Does not contain wordmark treatment for "haul"
+- Square aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_icon_black.svg`
+
+### White Haul Icon
+- For use in SERVICE PROVIDER facing emails
+- For use in LIGHT THEME email templates
+- Single Haul square brand icon
+- Does not contain wordmark treatment for "haul"
+- Square aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_icon_white.svg`
+
+### Black Haul Logo
+- For use in CONSUMER facing emails
+- For use in LIGHT THEME email templates
+- Single Haul square brand icon with "haul" wordmark
+- Landscape aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_wordmark_icon_black.svg`
+
+### White Haul Logo
+- For use in CONSUMER facing emails
+- For use in LIGHT THEME email templates
+- Single Haul square brand icon with "haul" wordmark
+- Landscape aspect ratio
+- URI: `https://cdn.haulwerk.com/images/haul_wordmark_icon_white.svg`
 
 ---
 

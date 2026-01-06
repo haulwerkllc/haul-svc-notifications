@@ -5,12 +5,17 @@ const { validateNotificationEvent } = require('../../utils/schema');
 const { getResolver } = require('./resolvers/registry');
 
 const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
-const docClient = DynamoDBDocumentClient.from(dynamoClient);
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
+  marshallOptions: { removeUndefinedValues: true },
+});
 const sqsClient = new SQSClient({ region: process.env.REGION });
 
 const NOTIFICATION_PREFERENCE_TABLE = process.env.NOTIFICATION_PREFERENCE_TABLE_NAME;
 const NOTIFICATION_INBOX_TABLE = process.env.NOTIFICATION_INBOX_TABLE_NAME;
-const JOB_TABLE = `Job-${process.env.ENV}`;
+const JOB_TABLE = process.env.JOB_TABLE_NAME;
+const BID_TABLE = process.env.BID_TABLE_NAME;
+const COMPANY_TABLE = process.env.COMPANY_TABLE_NAME;
+const MEDIA_BASE_URL = process.env.MEDIA_BASE_URL;
 const EMAIL_QUEUE_URL = process.env.EMAIL_QUEUE_URL;
 const PUSH_QUEUE_URL = process.env.PUSH_QUEUE_URL;
 const SMS_QUEUE_URL = process.env.SMS_QUEUE_URL;
@@ -174,13 +179,17 @@ async function constructNotificationContent(event) {
     case 'haul.job.posted':
       return await constructJobPostedNotification(entity.id);
     
+    case 'haul.bid.created':
+      return await constructBidCreatedNotification(entity.id);
+    
+    case 'haul.bid.updated':
+      return await constructBidUpdatedNotification(entity.id);
+    
     // Future event types will be added here:
     // case 'haul.job.canceled':
     //   return await constructJobCanceledNotification(entity.id);
     // case 'haul.job.closed':
     //   return await constructJobClosedNotification(entity.id);
-    // case 'haul.bid.created':
-    //   return await constructBidCreatedNotification(entity.id);
     // case 'haul.booking.created':
     //   return await constructBookingCreatedNotification(entity.id);
     
@@ -285,6 +294,335 @@ function formatAddress(address) {
 }
 
 /**
+ * Load bid data from DynamoDB
+ */
+async function loadBidData(bidId) {
+  try {
+    const result = await docClient.send(new GetCommand({
+      TableName: BID_TABLE,
+      Key: { id: bidId }
+    }));
+
+    if (!result.Item) {
+      console.warn('[Orchestrator] Bid not found', { bid_id: bidId });
+      return null;
+    }
+
+    return result.Item;
+  } catch (error) {
+    console.error('[Orchestrator] Error loading bid data', {
+      bid_id: bidId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Load company data from DynamoDB
+ */
+async function loadCompanyData(companyId) {
+  try {
+    const result = await docClient.send(new GetCommand({
+      TableName: COMPANY_TABLE,
+      Key: { id: companyId }
+    }));
+
+    if (!result.Item) {
+      console.warn('[Orchestrator] Company not found', { company_id: companyId });
+      return null;
+    }
+
+    return result.Item;
+  } catch (error) {
+    console.error('[Orchestrator] Error loading company data', {
+      company_id: companyId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Format cents to USD dollars
+ */
+function formatCentsToUSD(cents) {
+  if (cents === null || cents === undefined) return 'Price not specified';
+  const dollars = cents / 100;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(dollars);
+}
+
+/**
+ * Format job type for consumer-friendly display
+ */
+function formatJobTypeForConsumer(jobType) {
+  const map = {
+    'JUNK_REMOVAL': 'junk hauling',
+    'MOVE_SMALL': 'small move'
+  };
+  return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
+}
+
+/**
+ * Format pickup window for display
+ * @param {string} start - ISO timestamp for window start
+ * @param {string} end - ISO timestamp for window end
+ * @param {string} [timezone] - IANA timezone identifier (e.g., 'America/Los_Angeles')
+ */
+function formatPickupWindow(start, end, timezone) {
+  if (!start || !end) return 'Flexible';
+  
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  
+  const dateOptions = { 
+    weekday: 'short',
+    month: 'short', 
+    day: 'numeric',
+    ...(timezone && { timeZone: timezone })
+  };
+  
+  const timeOptions = { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    hour12: true,
+    ...(timezone && { timeZone: timezone })
+  };
+  
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', dateOptions);
+  };
+  
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', timeOptions);
+  };
+  
+  // Get timezone abbreviation for display
+  const tzAbbrev = timezone 
+    ? new Intl.DateTimeFormat('en-US', { timeZone: timezone, timeZoneName: 'short' })
+        .formatToParts(startDate)
+        .find(p => p.type === 'timeZoneName')?.value || ''
+    : '';
+  const tzSuffix = tzAbbrev ? ` ${tzAbbrev}` : '';
+  
+  // If same day, show date once
+  if (startDate.toDateString() === endDate.toDateString()) {
+    return `${formatDate(startDate)}, ${formatTime(startDate)} - ${formatTime(endDate)}${tzSuffix}`;
+  }
+  
+  return `${formatDate(startDate)} ${formatTime(startDate)} - ${formatDate(endDate)} ${formatTime(endDate)}${tzSuffix}`;
+}
+
+/**
+ * Construct notification content for haul.bid.created events
+ * Consumer-facing notification for new bid received
+ */
+async function constructBidCreatedNotification(bidId) {
+  // Load bid data
+  const bid = await loadBidData(bidId);
+  
+  if (!bid) {
+    return {
+      subject: 'You received a new bid',
+      body: 'A new bid has been submitted on your job.',
+      entity: { id: bidId, type: 'bid' }
+    };
+  }
+
+  // Load job data
+  const job = await loadJobData(bid.job_id);
+  
+  // Load company data
+  const company = bid.company_id ? await loadCompanyData(bid.company_id) : null;
+
+  // Get job timezone for proper time formatting
+  const jobTimezone = job?.service_location_timezone;
+
+  // Format bid details
+  const bidAmount = formatCentsToUSD(bid.amount_usd_cents);
+  const companyName = company?.name || 'A service provider';
+  const jobType = formatJobTypeForConsumer(bid.job_type);
+  const pickupWindow = formatPickupWindow(
+    bid.proposed_pickup_window_start,
+    bid.proposed_pickup_window_end,
+    jobTimezone
+  );
+  
+  // Build address with unit
+  let locationText = 'Your job location';
+  if (job?.service_address) {
+    locationText = formatAddress(job.service_address);
+    if (job.unit) {
+      locationText += `, Unit ${job.unit}`;
+    }
+  }
+
+  // Build subject line
+  const subject = 'You received a new bid on your job';
+
+  // Build body
+  const bodyParts = [
+    `${companyName} has submitted a bid on your ${jobType} job.`,
+    '',
+    `Bid amount: ${bidAmount}`,
+    `Location: ${locationText}`,
+    `Proposed service window: ${pickupWindow}`
+  ];
+
+  if (bid.notes) {
+    bodyParts.push('');
+    bodyParts.push('Provider notes:');
+    bodyParts.push(bid.notes);
+  }
+
+  bodyParts.push('');
+  bodyParts.push('Review this bid in the Haul app to accept and book.');
+
+  // Build company logo URL if available
+  const companyLogoUrl = company?.logo_key 
+    ? `${MEDIA_BASE_URL}/${company.logo_key}` 
+    : null;
+  const companyIconUrl = company?.icon_key 
+    ? `${MEDIA_BASE_URL}/${company.icon_key}` 
+    : null;
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: bidId,
+      type: 'bid'
+    },
+    data: {
+      bid_id: bidId,
+      bid_amount_usd_cents: bid.amount_usd_cents,
+      bid_amount_formatted: bidAmount,
+      job_id: bid.job_id,
+      job_type: bid.job_type,
+      job_type_formatted: jobType,
+      company_id: bid.company_id,
+      company_name: companyName,
+      company_logo_url: companyLogoUrl,
+      company_icon_url: companyIconUrl,
+      service_address: job?.service_address,
+      unit: job?.unit,
+      location_formatted: locationText,
+      proposed_pickup_window_start: bid.proposed_pickup_window_start,
+      proposed_pickup_window_end: bid.proposed_pickup_window_end,
+      pickup_window_formatted: pickupWindow,
+      bidding_closes_at: job?.bidding_closes_at,      service_location_timezone: jobTimezone,      notes: bid.notes
+    }
+  };
+}
+
+/**
+ * Construct notification content for haul.bid.updated events
+ * Consumer-facing notification for bid update
+ */
+async function constructBidUpdatedNotification(bidId) {
+  // Load bid data
+  const bid = await loadBidData(bidId);
+  
+  if (!bid) {
+    return {
+      subject: 'A bid on your job was updated',
+      body: 'A bid on your job has been updated.',
+      entity: { id: bidId, type: 'bid' }
+    };
+  }
+
+  // Load job data
+  const job = await loadJobData(bid.job_id);
+  
+  // Load company data
+  const company = bid.company_id ? await loadCompanyData(bid.company_id) : null;
+
+  // Get job timezone for proper time formatting
+  const jobTimezone = job?.service_location_timezone;
+
+  // Format bid details
+  const bidAmount = formatCentsToUSD(bid.amount_usd_cents);
+  const companyName = company?.name || 'A service provider';
+  const jobType = formatJobTypeForConsumer(bid.job_type);
+  const pickupWindow = formatPickupWindow(
+    bid.proposed_pickup_window_start,
+    bid.proposed_pickup_window_end,
+    jobTimezone
+  );
+  
+  // Build address with unit
+  let locationText = 'Your job location';
+  if (job?.service_address) {
+    locationText = formatAddress(job.service_address);
+    if (job.unit) {
+      locationText += `, Unit ${job.unit}`;
+    }
+  }
+
+  // Build subject line
+  const subject = 'A bid on your job was updated';
+
+  // Build body
+  const bodyParts = [
+    `${companyName} has updated their bid on your ${jobType} job.`,
+    '',
+    `Updated bid amount: ${bidAmount}`,
+    `Location: ${locationText}`,
+    `Proposed service window: ${pickupWindow}`
+  ];
+
+  if (bid.notes) {
+    bodyParts.push('');
+    bodyParts.push('Provider notes:');
+    bodyParts.push(bid.notes);
+  }
+
+  bodyParts.push('');
+  bodyParts.push('Review the updated bid in the Haul app.');
+
+  // Build company logo URL if available
+  const companyLogoUrl = company?.logo_key 
+    ? `${MEDIA_BASE_URL}/${company.logo_key}` 
+    : null;
+  const companyIconUrl = company?.icon_key 
+    ? `${MEDIA_BASE_URL}/${company.icon_key}` 
+    : null;
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: bidId,
+      type: 'bid'
+    },
+    data: {
+      bid_id: bidId,
+      bid_amount_usd_cents: bid.amount_usd_cents,
+      bid_amount_formatted: bidAmount,
+      job_id: bid.job_id,
+      job_type: bid.job_type,
+      job_type_formatted: jobType,
+      company_id: bid.company_id,
+      company_name: companyName,
+      company_logo_url: companyLogoUrl,
+      company_icon_url: companyIconUrl,
+      service_address: job?.service_address,
+      unit: job?.unit,
+      location_formatted: locationText,
+      proposed_pickup_window_start: bid.proposed_pickup_window_start,
+      proposed_pickup_window_end: bid.proposed_pickup_window_end,
+      pickup_window_formatted: pickupWindow,
+      bidding_closes_at: job?.bidding_closes_at,
+      service_location_timezone: jobTimezone,
+      notes: bid.notes
+    }
+  };
+}
+
+/**
  * Load notification preferences for a user
  * Returns default preferences if none exist
  */
@@ -299,15 +637,23 @@ async function loadNotificationPreferences(userId) {
     }));
 
     if (result.Items && result.Items.length > 0) {
+      console.log('[Orchestrator] Loaded preferences for user', {
+        user_id: userId,
+        preferences: result.Items[0]
+      });
       return result.Items[0];
     }
+
+    console.log('[Orchestrator] No preferences found, using defaults', { user_id: userId });
 
     // Return default preferences
     return {
       user_id: userId,
-      email_enabled: true,
-      push_enabled: false,
-      sms_enabled: false
+      channels: {
+        email: true,
+        push: false,
+        sms: false
+      }
     };
   } catch (error) {
     console.error('[Orchestrator] Error loading preferences', {
@@ -318,9 +664,11 @@ async function loadNotificationPreferences(userId) {
     // Return default preferences on error
     return {
       user_id: userId,
-      email_enabled: true,
-      push_enabled: false,
-      sms_enabled: false
+      channels: {
+        email: true,
+        push: false,
+        sms: false
+      }
     };
   }
 }
@@ -332,17 +680,17 @@ function determineEnabledChannels(eventType, preferences) {
   const channels = [];
 
   // Email: enabled by default unless explicitly disabled
-  if (preferences.email_enabled !== false) {
+  if (preferences.channels?.email !== false) {
     channels.push('email');
   }
 
   // Push: must be explicitly enabled (Phase 2)
-  if (preferences.push_enabled === true) {
+  if (preferences.channels?.push === true) {
     channels.push('push');
   }
 
   // SMS: must be explicitly enabled (Phase 3)
-  if (preferences.sms_enabled === true) {
+  if (preferences.channels?.sms === true) {
     channels.push('sms');
   }
 

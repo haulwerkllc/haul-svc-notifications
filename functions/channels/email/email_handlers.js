@@ -1,6 +1,7 @@
 const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const { buildJobPostedEmail, buildBidCreatedEmail, buildBidUpdatedEmail } = require('./templates');
 
 const sesClient = new SESv2Client({ region: process.env.REGION });
 const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
@@ -59,14 +60,16 @@ exports.handler = async (event) => {
  * Send email notification via SES v2
  */
 async function sendEmailNotification(message) {
-  const { user_id, event_type, notification_id, notification_timestamp, subject, body } = message;
+  const { user_id, event_type, notification_id, notification_timestamp, data } = message;
 
-  // Use constructed notification content from orchestrator
-  const emailContent = {
-    subject: subject || 'Haul Notification',
-    html: formatBodyAsHtml(body),
-    text: body
-  };
+  // Render event-specific email template
+  const emailContent = renderEmailTemplate(event_type, data);
+  
+  if (!emailContent) {
+    console.error('[EmailChannel] No template for event type', { event_type });
+    await updateDeliveryStatus(user_id, notification_id, notification_timestamp, 'failed', 'No template available');
+    return;
+  }
 
   // Resolve user contact information
   const recipientEmail = await resolveUserEmail(user_id);
@@ -129,7 +132,31 @@ async function sendEmailNotification(message) {
 }
 
 /**
- * Format plain text body as simple HTML
+ * Render email template based on event type
+ */
+function renderEmailTemplate(eventType, data) {
+  switch (eventType) {
+    case 'haul.job.posted':
+      return buildJobPostedEmail(data);
+    
+    case 'haul.bid.created':
+      return buildBidCreatedEmail(data);
+    
+    case 'haul.bid.updated':
+      return buildBidUpdatedEmail(data);
+    
+    // Future event types:
+    // case 'haul.job.canceled':
+    //   return buildJobCanceledEmail(data);
+    
+    default:
+      console.warn('[EmailChannel] No template for event type, using fallback', { event_type: eventType });
+      return null;
+  }
+}
+
+/**
+ * Format plain text body as simple HTML (fallback only)
  */
 function formatBodyAsHtml(body) {
   if (!body) return '<p>Haul Notification</p>';
