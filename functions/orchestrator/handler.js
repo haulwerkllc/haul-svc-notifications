@@ -191,9 +191,14 @@ async function constructNotificationContent(event) {
     case 'haul.bid.updated':
       return await constructBidUpdatedNotification(entity.id);
     
-    // Future event types will be added here:
-    // case 'haul.booking.created':
-    //   return await constructBookingCreatedNotification(entity.id);
+    case 'haul.booking.created':
+      return constructBookingCreatedNotification(event);
+    
+    case 'haul.booking.assigned':
+      return constructBookingAssignedNotification(event);
+    
+    case 'haul.booking.in_progress':
+      return constructBookingInProgressNotification(event);
     
     default:
       console.warn('[Orchestrator] No content constructor for event type', { event_type });
@@ -814,6 +819,74 @@ async function queryOpenBidsForJob(jobId) {
     });
     return [];
   }
+}
+
+/**
+ * Construct notification content for haul.booking.created events
+ * Recipients: Service provider OWNER/ADMIN/DISPATCHER users
+ * 
+ * This event already contains all necessary data in event.context from the jobs service.
+ * We pass it through as the data field for email templates.
+ */
+function constructBookingCreatedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  
+  console.log('[constructBookingCreatedNotification] event.context:', JSON.stringify(event.context, null, 2));
+  console.log('[constructBookingCreatedNotification] job_type in context:', event.context?.job_type);
+  
+  return {
+    subject: `Job won – Booking ${bookingNumber} created`,
+    body: `Your bid has been accepted and booking ${bookingNumber} has been created.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.assigned events
+ * Recipients: Customer AND driver
+ * 
+ * This event already contains all necessary data in event.context.
+ */
+function constructBookingAssignedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  
+  console.log('[constructBookingAssignedNotification] event.context:', JSON.stringify(event.context, null, 2));
+  console.log('[constructBookingAssignedNotification] booking_number:', event.context?.booking_number);
+  console.log('[constructBookingAssignedNotification] driver_given_name:', event.context?.driver_given_name);
+  
+  return {
+    subject: `Crew assigned to booking ${bookingNumber}`,
+    body: `A crew has been assigned to your booking.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.in_progress events
+ * Recipients: Customer
+ * 
+ * This event already contains all necessary data in event.context.
+ */
+function constructBookingInProgressNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  
+  return {
+    subject: `Your service has started – Booking ${bookingNumber}`,
+    body: `Your service provider has started working on your booking.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
 }
 
 /**

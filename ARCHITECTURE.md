@@ -236,6 +236,40 @@ Each resolver:
 - Accepts the validated canonical ingress schema
 - Returns a list of resolved recipient user_ids (and optionally metadata)
 
+### Resolver Contract
+
+**Resolvers MUST:**
+- Return `user_id` for each recipient
+- Optionally return `metadata` describing the recipient's relationship to the event
+- Log resolution start, missing data, and final recipient count
+- Return `[]` on failure (never throw)
+
+**Resolvers MUST NOT:**
+- Select templates
+- Choose delivery channels
+- Perform delivery
+- Load notification preferences
+- Bypass the orchestrator
+
+**Resolver Return Format:**
+```javascript
+[
+  {
+    user_id: "uuid",
+    metadata: {
+      recipient_type: "customer" | "driver" | "provider",
+      // Additional context as needed
+    }
+  }
+]
+```
+
+**Metadata Usage:**
+- The `metadata` field allows resolvers to describe the recipient's relationship to the event
+- The orchestrator uses this metadata to select appropriate templates, tone, and copy
+- Common `recipient_type` values: `customer`, `driver`, `provider`
+- Resolvers MUST NOT make presentation decisions — only describe the relationship
+
 ## Orchestrator flow
 
 ```

@@ -25,6 +25,7 @@ provider:
     DEVICE_ENDPOINT_TABLE_NAME: DeviceEndpoint-${sls:stage}
     JOB_TABLE_NAME: Job-${sls:stage}
     BID_TABLE_NAME: Bid-${sls:stage}
+    BOOKING_TABLE_NAME: Booking-${sls:stage}
     COMPANY_TABLE_NAME: Company-${sls:stage}
     USER_TABLE_NAME: User-${sls:stage}
     COMPANY_ROLE_TABLE_NAME: CompanyRole-${sls:stage}
@@ -63,6 +64,8 @@ provider:
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Job-${sls:stage}/*
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Bid-${sls:stage}
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Bid-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Booking-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Booking-${sls:stage}/*
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Company-${sls:stage}
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Company-${sls:stage}/*
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/CompanyRole-${sls:stage}

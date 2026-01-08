@@ -1,18 +1,35 @@
 const NotificationResolver = require('./base');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const { resolveUsersByCompanyRole } = require('../../../utils/company-role-lookup');
+
+const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
+  marshallOptions: { removeUndefinedValues: true },
+});
+
+const BOOKING_TABLE = process.env.BOOKING_TABLE_NAME;
+const JOB_TABLE = process.env.JOB_TABLE_NAME;
+
+// Roles eligible to receive booking creation notifications
+const ELIGIBLE_ROLES = ['OWNER', 'ADMIN', 'DISPATCHER'];
 
 /**
  * Resolver for haul.booking.created events
  * 
- * Recipients: The provider whose bid was accepted
+ * DELIVERY TARGET: SERVICE PROVIDER USERS ONLY
+ * 
+ * Recipients: Service provider users (OWNER/ADMIN/DISPATCHER) from the winning company
  * 
  * BOUNDARY: This resolver performs LOOKUP ONLY
- * - Returns user_id of provider
+ * - Returns user_ids of service provider users with recipient_type metadata
  * - MUST NOT evaluate preferences, determine channels, or perform delivery
  * 
- * TODO: Implement provider lookup
- * - Query DynamoDB Booking table for booking details
- * - Extract provider_user_id or provider_company_id
- * - Resolve to individual user(s) if company-level
+ * Resolution:
+ * 1. Get Booking by id
+ * 2. Extract booking.company_id (the winning company)
+ * 3. Query CompanyRole table for OWNER/ADMIN/DISPATCHER users
+ * 4. Return recipients with service_provider metadata
  */
 class BookingCreatedResolver extends NotificationResolver {
   getEventType() {
@@ -25,13 +42,80 @@ class BookingCreatedResolver extends NotificationResolver {
       entity_id: event.entity.id
     });
 
-    // TODO: Query DynamoDB for booking details
-    // - Table: Booking-${env}
-    // - Key: booking_id = entity.id
-    // - Return: [{ user_id: booking.provider_user_id }]
-    // - Or resolve company roles if provider_company_id is set
-    
-    return [];
+    const bookingId = event.entity.id;
+
+    try {
+      // Step 1: Get booking
+      const booking = await this.getBooking(bookingId);
+      if (!booking) {
+        console.warn('[BookingCreatedResolver] Booking not found', { booking_id: bookingId });
+        return [];
+      }
+
+      // Step 2: Extract company_id
+      if (!booking.company_id) {
+        console.warn('[BookingCreatedResolver] Booking has no company_id', { 
+          booking_id: bookingId
+        });
+        return [];
+      }
+
+      console.log('[BookingCreatedResolver] Resolving service provider users', {
+        booking_id: bookingId,
+        company_id: booking.company_id
+      });
+
+      // Step 3: Get service provider users using shared helper
+      const recipients = await resolveUsersByCompanyRole({
+        companyIds: booking.company_id,
+        eligibleRoles: ELIGIBLE_ROLES,
+        includeMetadata: false,
+        logPrefix: 'BookingCreatedResolver'
+      });
+
+      // Step 4: Add recipient_type metadata
+      const recipientsWithMetadata = recipients.map(recipient => ({
+        user_id: recipient.user_id,
+        metadata: {
+          recipient_type: 'service_provider',
+          company_id: booking.company_id
+        }
+      }));
+
+      console.log('[BookingCreatedResolver] Resolved recipients', {
+        booking_id: bookingId,
+        company_id: booking.company_id,
+        recipient_count: recipientsWithMetadata.length
+      });
+
+      return recipientsWithMetadata;
+    } catch (error) {
+      console.error('[BookingCreatedResolver] Error resolving recipients', {
+        booking_id: bookingId,
+        error: error.message
+      });
+      return [];
+    }
+  }
+
+  async getBooking(bookingId) {
+    const result = await docClient.send(
+      new GetCommand({
+        TableName: BOOKING_TABLE,
+        Key: { id: bookingId }
+      })
+    );
+    return result.Item || null;
+  }
+
+  async getJob(jobId) {
+    const result = await docClient.send(
+      new GetCommand({
+        TableName: JOB_TABLE,
+        Key: { id: jobId }
+      })
+    );
+    return result.Item || null;
   }
 }
 

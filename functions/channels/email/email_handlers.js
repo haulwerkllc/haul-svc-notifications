@@ -6,7 +6,10 @@ const {
   buildJobCanceledEmail,
   buildJobClosedEmail,
   buildBidCreatedEmail, 
-  buildBidUpdatedEmail 
+  buildBidUpdatedEmail,
+  buildBookingCreatedEmail,
+  buildBookingAssignedCustomerEmail,
+  buildBookingAssignedDriverEmail
 } = require('./templates');
 
 const sesClient = new SESv2Client({ region: process.env.REGION });
@@ -66,10 +69,21 @@ exports.handler = async (event) => {
  * Send email notification via SES v2
  */
 async function sendEmailNotification(message) {
-  const { user_id, event_type, notification_id, notification_timestamp, data } = message;
+  const { user_id, event_type, notification_id, notification_timestamp, data, metadata } = message;
+
+  console.log('[EmailChannel] Rendering template for event', {
+    event_type,
+    data_keys: Object.keys(data || {}),
+    metadata_keys: Object.keys(metadata || {}),
+    job_type: data?.job_type,
+    recipient_type: metadata?.recipient_type
+  });
+
+  // Merge metadata into data for template rendering
+  const templateData = { ...data, ...metadata };
 
   // Render event-specific email template
-  const emailContent = renderEmailTemplate(event_type, data);
+  const emailContent = renderEmailTemplate(event_type, templateData);
   
   if (!emailContent) {
     console.error('[EmailChannel] No template for event type', { event_type });
@@ -156,6 +170,20 @@ function renderEmailTemplate(eventType, data) {
     
     case 'haul.bid.updated':
       return buildBidUpdatedEmail(data);
+    
+    case 'haul.booking.created':
+      return buildBookingCreatedEmail(data);
+    
+    case 'haul.booking.assigned':
+      // Route to appropriate template based on recipient type
+      if (data.recipient_type === 'customer') {
+        return buildBookingAssignedCustomerEmail(data);
+      } else if (data.recipient_type === 'driver') {
+        return buildBookingAssignedDriverEmail(data);
+      } else {
+        console.error('[renderEmailTemplate] Unknown recipient_type for booking.assigned:', data.recipient_type, 'Available data keys:', Object.keys(data));
+        return null;
+      }
     
     default:
       console.warn('[EmailChannel] No template for event type, using fallback', { event_type: eventType });

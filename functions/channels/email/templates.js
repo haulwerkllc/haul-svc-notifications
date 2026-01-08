@@ -134,9 +134,8 @@ function buildServiceProviderTemplate({ subject, preheader, bodyContent, footerN
     </div>
     <div class="footer">
       <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_black.svg" alt="Haul" class="footer-logo">
-      ${footerNote ? `<p style="margin: 0 0 12px 0;">${footerNote}</p>` : ''}
-      <p style="margin: 0 0 8px 0;">You received this because you have a service area that matches this job location. 
-        Please visit the Haul Dispatcher Portal to update your <a href="${DISPATCHER_BASE_URL}/dashboard/profile/notifications">notification preferences</a>· 
+      <p style="margin: 0 0 8px 0;">${footerNote || 'You received this because you have a service area that matches this job location.'} 
+        Please visit the Haul Dispatcher Portal to update your <a href="${DISPATCHER_BASE_URL}/dashboard/profile/notifications">notification preferences</a>. 
         If you believe you received this email in error, contact us at <a href="mailto:${SUPPORT_EMAIL}">support@haulwerk.com</a>.
       </p>
       <p style="margin: 8px 0 0 0;">© ${new Date().getFullYear()} Haulwerk, LLC</p>
@@ -266,7 +265,7 @@ function buildConsumerTemplate({ subject, preheader, bodyContent, footerNote }) 
     <div class="footer">
       <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_blue_char.svg" alt="Haul" class="footer-logo">
       ${footerNote ? `<p style="margin: 0 0 12px 0;">${footerNote}</p>` : ''}
-      <p style="margin: 0 0 8px 0;">You received this because you have an account action that requires your attention at Haul. 
+      <p style="margin: 0 0 8px 0;">You received this because you have subscribed to transactional notifications from Haul.
         Please visit the Haul app or website to update your <a href="${BASE_URL}/user/preferences">notification preferences</a>· 
         If you believe you received this email in error, contact us at <a href="mailto:${SUPPORT_EMAIL}">support@haulwerk.com</a>.
       </p>
@@ -857,6 +856,268 @@ function buildJobClosedNoQuotesEmail({ jobType, location, jobId }) {
 }
 
 /**
+ * Build booking created email for service providers
+ * Notifies OWNER/ADMIN/DISPATCHER that their bid was accepted
+ */
+function buildBookingCreatedEmail(data) {
+  console.log('[buildBookingCreatedEmail] Received data:', JSON.stringify(data, null, 2));
+  
+  const bookingNumber = data.booking_number || 'N/A';
+  const amountCents = data.amount_usd_cents || 0;
+  const amountDollars = (amountCents / 100).toFixed(2);
+  const location = formatAddress(data.service_address);
+  const unit = data.unit ? ` ${data.unit}` : '';
+  const companyName = data.company_name || 'your company';
+  const logoUrl = data.logo_url;
+  
+  // Normalize job type for display
+  const jobType = data.job_type || 'JUNK_REMOVAL'; // Default fallback
+  console.log('[buildBookingCreatedEmail] job_type from data:', data.job_type, '| normalized jobType:', jobType);
+  
+  const jobTypeDisplay = jobType === 'JUNK_REMOVAL' 
+    ? 'junk removal' 
+    : jobType === 'MOVE_SMALL' 
+    ? 'small-medium moving' 
+    : jobType.toLowerCase().replace(/_/g, ' ');
+  
+  console.log('[buildBookingCreatedEmail] jobTypeDisplay:', jobTypeDisplay);
+
+  const subject = `Job won – Booking ${bookingNumber} created`;
+  const preheader = `Your bid has been accepted. Prepare for service.`;
+
+  const logoHtml = logoUrl 
+    ? `<img src=\"${escapeHtml(logoUrl)}\" alt=\"${escapeHtml(companyName)}\" style=\"max-width: 120px; height: auto; margin: 0 0 24px 0; display: block;\">`
+    : '';
+
+  const bodyContent = `
+    <h1>You've won a job</h1>
+    <p>A customer has accepted your bid and created a booking.</p>
+    ${logoHtml}
+    <div style=\"margin: 24px 0;\">
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Booking No.</span>
+        <span class=\"detail-value\">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Amount</span>
+        <span class=\"detail-value\">$${escapeHtml(amountDollars)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Location</span>
+        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+      </div>
+    </div>
+    
+    <p>So, what's next? Prepare for ${escapeHtml(jobTypeDisplay)} service and assign a crew to get this booking started.</p>
+    
+    <div class=\"cta\">
+      <a href=\"${DISPATCHER_BASE_URL}/dashboard/jobs/booked/${escapeHtml(bookingNumber)}\" class=\"cta-button\">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    "You've won a job",
+    '',
+    `Congrats! A customer has accepted your bid for ${jobTypeDisplay} services.`,
+    '',
+    `Booking No.: ${bookingNumber}`,
+    `Amount: $${amountDollars}`,
+    `Location: ${location}`,
+    '',
+    `So, what's next? Prepare for ${jobTypeDisplay} service and assign a crew to get this booking started.`,
+    '',
+    `View booking: ${DISPATCHER_BASE_URL}/dashboard/jobs/booked/${bookingNumber}`,
+    '',
+    '---',
+    'You received this because you have subscribed to transactional notifications from Haul.',
+    `Manage your notification preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  // Custom footer note for this template
+  const footerNote = 'You received this because you have subscribed to transactional notifications from Haul.';
+
+  return {
+    subject,
+    html: buildServiceProviderTemplate({ subject, preheader, bodyContent, footerNote }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build booking assigned email for CUSTOMER
+ * Notifies customer that a crew has been assigned to their booking
+ */
+function buildBookingAssignedCustomerEmail(data) {
+  console.log('[buildBookingAssignedCustomerEmail] Received data:', JSON.stringify(data, null, 2));
+  
+  const bookingNumber = data.booking_number || 'N/A';
+  const location = formatAddress(data.service_address);
+  const unit = data.unit ? `, ${data.unit}` : '';
+  const companyName = data.company_name || 'the service provider';
+  const driverName = data.driver_given_name || 'your crew leader';
+  const logoUrl = data.logo_url;
+  
+  // Format pickup window
+  const pickupWindow = formatTimingPreference(
+    'SCHEDULED',
+    data.pickup_window_start,
+    data.pickup_window_end
+  );
+
+  const subject = `Crew assigned to booking ${bookingNumber}`;
+  const preheader = `${driverName} from ${companyName} will handle your service.`;
+
+  const bodyContent = `
+    <h1>Crew assigned to your booking</h1>
+    <p>Your service is moving forward.</p>
+    
+    ${logoUrl ? `<img src=\"${escapeHtml(logoUrl)}\" alt=\"${escapeHtml(companyName)}\" style=\"max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;\">` : ''}
+    
+    <div style=\"margin: 24px 0;\">
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Crew leader</span>
+        <span class=\"detail-value\">${escapeHtml(driverName)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Company</span>
+        <span class=\"detail-value\">${escapeHtml(companyName)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Booking No.</span>
+        <span class=\"detail-value\">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Location</span>
+        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Pickup window</span>
+        <span class=\"detail-value\">${escapeHtml(pickupWindow)}</span>
+      </div>
+    </div>
+    
+    <p>Your crew has been assigned and will contact you to coordinate service.</p>
+    
+    <div class=\"cta\">
+      <a href=\"${BASE_URL}/bookings\" class=\"cta-button\" style=\"color:#ffffff !important;text-decoration:none;\">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Crew assigned to your booking',
+    '',
+    'Your service is moving forward.',
+    '',
+    `Crew leader: ${driverName}`,
+    `Company: ${companyName}`,
+    `Booking No.: ${bookingNumber}`,
+    `Location: ${location}${unit}`,
+    `Pickup window: ${pickupWindow}`,
+    '',
+    'Your crew has been assigned and will contact you to coordinate service.',
+    '',
+    `View booking: ${BASE_URL}/bookings`,
+    '',
+    '---',
+    'You received this because a crew was assigned to your booking.',
+    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build booking assigned email for DRIVER
+ * Notifies driver they have been assigned to handle a booking
+ */
+function buildBookingAssignedDriverEmail(data) {
+  console.log('[buildBookingAssignedDriverEmail] Received data:', JSON.stringify(data, null, 2));
+  
+  const bookingNumber = data.booking_number || 'N/A';
+  const location = formatAddress(data.service_address);
+  const unit = data.unit ? `, ${data.unit}` : '';
+  const companyName = data.company_name || 'your company';
+  const logoUrl = data.logo_url;
+  
+  // Format pickup window
+  const pickupWindow = formatTimingPreference(
+    'SCHEDULED',
+    data.pickup_window_start,
+    data.pickup_window_end
+  );
+
+  const subject = `You've been assigned to booking ${bookingNumber}`;
+  const preheader = `Job details and location ready for review.`;
+
+  const logoHtml = logoUrl 
+    ? `<img src=\"${escapeHtml(logoUrl)}\" alt=\"${escapeHtml(companyName)}\" style=\"max-width: 120px; height: auto; margin: 0 0 24px 0; display: block;\">`
+    : '';
+
+  const bodyContent = `
+    <h1>Assignment confirmed</h1>
+    <p>You've been assigned to handle this booking.</p>
+    ${logoHtml}
+    <div style=\"margin: 24px 0;\">
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Booking No.</span>
+        <span class=\"detail-value\">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Location</span>
+        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Pickup window</span>
+        <span class=\"detail-value\">${escapeHtml(pickupWindow)}</span>
+      </div>
+    </div>
+    
+    <p>Review the job details and coordinate with the customer to complete the service.</p>
+    
+    <div class=\"cta\">
+      <a href=\"${DISPATCHER_BASE_URL}/dashboard/bookings\" class=\"cta-button\">View job details</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Assignment confirmed',
+    '',
+    "You've been assigned to handle this booking.",
+    '',
+    `Booking No.: ${bookingNumber}`,
+    `Location: ${location}${unit}`,
+    `Pickup window: ${pickupWindow}`,
+    '',
+    'Review the job details and coordinate with the customer to complete the service.',
+    '',
+    `View job details: ${DISPATCHER_BASE_URL}/dashboard/bookings`,
+    '',
+    '---',
+    'You received this because you were assigned to a booking.',
+    `Manage your notification preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildServiceProviderTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
  * Escape HTML to prevent XSS
  */
 function escapeHtml(text) {
@@ -879,6 +1140,9 @@ module.exports = {
   buildJobClosedEmail,
   buildBidCreatedEmail,
   buildBidUpdatedEmail,
+  buildBookingCreatedEmail,
+  buildBookingAssignedCustomerEmail,
+  buildBookingAssignedDriverEmail,
   normalizeJobType,
   normalizePropertyType,
   formatTimingPreference,
