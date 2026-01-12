@@ -16,3 +16,5 @@ notificationsOrchestrator:
       Ref: PushChannelQueue
     SMS_QUEUE_URL:
       Ref: SmsChannelQueue
+    ADMIN_QUEUE_URL:
+      Ref: AdminChannelQueue

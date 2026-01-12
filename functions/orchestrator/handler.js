@@ -3,6 +3,7 @@ const { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand } = require
 const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
 const { validateNotificationEvent } = require('../../utils/schema');
 const { getResolver } = require('./resolvers/registry');
+const { isAdminEligibleEvent } = require('./admin-event-registry');
 
 const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
@@ -19,6 +20,7 @@ const MEDIA_BASE_URL = process.env.MEDIA_BASE_URL;
 const EMAIL_QUEUE_URL = process.env.EMAIL_QUEUE_URL;
 const PUSH_QUEUE_URL = process.env.PUSH_QUEUE_URL;
 const SMS_QUEUE_URL = process.env.SMS_QUEUE_URL;
+const ADMIN_QUEUE_URL = process.env.ADMIN_QUEUE_URL;
 
 /**
  * Notifications Orchestrator Lambda
@@ -73,17 +75,54 @@ exports.handler = async (event) => {
       count: recipients.length
     });
 
+    // Check admin routing mode
+    const isAdminOnly = notificationEvent.recipients?.admin_only === true;
+    const isAdminEligible = isAdminEligibleEvent(notificationEvent.event_type);
+
+    // Admin-only mode: skip user routing, send only to admin
+    if (isAdminOnly) {
+      console.log('[Orchestrator] Admin-only event, skipping user routing', {
+        event_id: notificationEvent.event_id,
+        event_type: notificationEvent.event_type
+      });
+      // Build enriched notification content for admin
+      const notificationContent = await constructNotificationContent(notificationEvent);
+      await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: 'Admin-only notification sent',
+          event_id: notificationEvent.event_id
+        })
+      };
+    }
+
     if (recipients.length === 0) {
       console.info('[Orchestrator] No recipients to notify (resolver returned empty list)');
+      // Still send to admin if eligible, even with no user recipients
+      if (isAdminEligible) {
+        const notificationContent = await constructNotificationContent(notificationEvent);
+        await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
+      }
       return {
         statusCode: 200,
         body: JSON.stringify({ message: 'No recipients', skipped: true })
       };
     }
 
-    // Process each recipient
+    // Process each recipient (standard user routing)
     for (const recipient of recipients) {
       await processRecipient(recipient, notificationEvent);
+    }
+
+    // Dual routing: also send to admin if event is eligible
+    if (isAdminEligible) {
+      console.log('[Orchestrator] Event is admin-eligible, routing to admin channel', {
+        event_id: notificationEvent.event_id,
+        event_type: notificationEvent.event_type
+      });
+      const notificationContent = await constructNotificationContent(notificationEvent);
+      await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
     }
 
     return {
@@ -1076,3 +1115,58 @@ async function enqueueToChannel(channel, userId, event, notificationId, timestam
     throw error;
   }
 }
+
+/**
+ * Enqueue event to admin channel
+ * Admin channel receives the full event, resolved recipient data, and enriched notification content
+ * Does NOT check notification preferences
+ */
+async function enqueueToAdminChannel(event, resolvedRecipients, notificationContent) {
+  if (!ADMIN_QUEUE_URL) {
+    console.warn('[Orchestrator] ADMIN_QUEUE_URL not configured, skipping admin channel');
+    return;
+  }
+
+  const message = {
+    event_id: event.event_id,
+    event_type: event.event_type,
+    occurred_at: event.occurred_at,
+    actor: event.actor,
+    entity: event.entity,
+    context: event.context || {},
+    recipients: event.recipients,
+    // Include resolved recipient data (enriched by resolver)
+    resolved_recipients: resolvedRecipients.map(r => ({
+      user_id: r.user_id,
+      metadata: r.metadata || {}
+    })),
+    recipient_count: resolvedRecipients.length,
+    // Include enriched notification content (same data sent to email/push/sms)
+    notification_content: {
+      subject: notificationContent.subject,
+      body: notificationContent.body,
+      data: notificationContent.data || {},
+      entity: notificationContent.entity || {}
+    }
+  };
+
+  try {
+    await sqsClient.send(new SendMessageCommand({
+      QueueUrl: ADMIN_QUEUE_URL,
+      MessageBody: JSON.stringify(message)
+    }));
+
+    console.log('[Orchestrator] Enqueued to admin channel', {
+      event_id: event.event_id,
+      event_type: event.event_type,
+      recipient_count: resolvedRecipients.length
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Error enqueuing to admin channel', {
+      event_id: event.event_id,
+      error: error.message
+    });
+    throw error;
+  }
+}
+

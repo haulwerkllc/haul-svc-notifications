@@ -62,3 +62,23 @@ Resources:
     Properties:
       QueueName: haul-notifications-sms-dlq-${sls:stage}
       MessageRetentionPeriod: 1209600  # 14 days
+
+  # Admin Channel Queue
+  AdminChannelQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-admin-${sls:stage}
+      VisibilityTimeout: 180  # 3 minutes (6x Lambda timeout)
+      MessageRetentionPeriod: 1209600  # 14 days
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - AdminChannelDLQ
+            - Arn
+        maxReceiveCount: 3
+
+  AdminChannelDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: haul-notifications-admin-dlq-${sls:stage}
+      MessageRetentionPeriod: 1209600  # 14 days

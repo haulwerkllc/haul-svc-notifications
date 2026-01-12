@@ -410,7 +410,8 @@ Example:
   "recipients": {
     "mode": "service_area | explicit",
     "service_area_ids": ["AREA#la-west"],
-    "user_ids": ["USER#abc"]
+    "user_ids": ["USER#abc"],
+    "admin_only": false  // Optional: If true, skips user routing and sends only to admin channel
   },
 
   "entity": {
@@ -423,6 +424,199 @@ Example:
   }
 }
 ```
+
+---
+
+## Admin Events
+
+The `admin` channel is a specialized notification channel for internal alerting via third-party services (Slack, Zapier, etc.).
+
+### Admin Channel Characteristics
+
+- **No preference checks**: Events sent to the admin channel bypass NotificationPreferences entirely
+- **API-based delivery**: Recipients are API endpoints (Slack webhooks, Zapier endpoints, etc.), not individual users
+- **Post-resolver routing**: Admin channel receives the same enriched, resolved data as user-facing channels
+- **Dual routing support**: Events can be sent to both user channels AND admin channel simultaneously
+- **Exclusive routing support**: Events can be sent ONLY to admin channel using `admin_only` flag
+
+### Admin Routing Modes
+
+There are three routing scenarios for admin events:
+
+#### 1. Admin-Only Events (`admin_only: true`)
+
+Events that should ONLY be sent to the admin channel and skip all user notifications.
+
+**Usage**: Internal alerts, system monitoring, flagged content, review queues
+
+**Implementation**: Producer services set `admin_only: true` in the event detail's `recipients` object:
+
+```javascript
+await eventBridge.putEvents({
+  Entries: [{
+    Source: 'haul.jobs',
+    DetailType: 'haul.job.flagged_for_review',
+    Detail: JSON.stringify({
+      event_id: 'evt_123',
+      event_type: 'haul.job.flagged_for_review',
+      occurred_at: new Date().toISOString(),
+      actor: { type: 'system', id: 'SYSTEM' },
+      recipients: {
+        mode: 'explicit',
+        admin_only: true  // This event goes ONLY to admin channel
+      },
+      entity: { type: 'job', id: jobId },
+      context: { reason: 'Suspicious activity detected' }
+    })
+  }]
+}).promise();
+```
+
+**Orchestrator behavior**:
+- Resolver runs to enrich event data
+- User routing is skipped entirely
+- Event is routed only to admin SQS queue
+- NotificationPreferences are never checked
+
+#### 2. Admin-Eligible Events (Dual Routing)
+
+Events that notify users via standard channels (email, push) AND send a copy to the admin channel for monitoring.
+
+**Usage**: High-value events that require both user notification and internal visibility
+
+**Implementation**: Event types are registered in `ADMIN_ELIGIBLE_EVENTS` registry:
+
+```javascript
+// functions/orchestrator/admin-event-registry.js
+const ADMIN_ELIGIBLE_EVENTS = new Set([
+  'haul.job.posted',
+  'haul.bid.created',
+  'haul.booking.created',
+  'haul.booking.completed'
+]);
+```
+
+Producer services emit standard events (no special flags required):
+
+```javascript
+await eventBridge.putEvents({
+  Entries: [{
+    Source: 'haul.bookings',
+    DetailType: 'haul.booking.created',
+    Detail: JSON.stringify({
+      event_id: 'evt_456',
+      event_type: 'haul.booking.created',
+      occurred_at: new Date().toISOString(),
+      actor: { type: 'user', id: userId },
+      recipients: { mode: 'explicit', user_ids: [providerId] },
+      entity: { type: 'booking', id: bookingId },
+      context: { /* booking details */ }
+    })
+  }]
+}).promise();
+```
+
+**Orchestrator behavior**:
+- Resolver runs to enrich event data and identify recipients
+- User notifications are sent via email/push (preferences checked)
+- Admin channel ALSO receives the same enriched data
+- Both channels receive identical post-resolver payload
+
+#### 3. User-Only Events (Default)
+
+Events that notify users but are not sent to the admin channel.
+
+**Usage**: Standard notifications that don't require internal monitoring
+
+**Implementation**: Standard events that are NOT in `ADMIN_ELIGIBLE_EVENTS` and do NOT have `admin_only: true`
+
+**Orchestrator behavior**:
+- Resolver runs to enrich event data
+- User notifications are sent via standard channels
+- Admin channel is not invoked
+
+### Orchestrator Flow (Updated)
+
+```javascript
+// 1. Resolve event (always runs to enrich data)
+const resolver = resolverRegistry[event.event_type];
+if (!resolver) {
+  log.warn("No resolver for event type", event.event_type);
+  return;
+}
+
+const resolvedData = await resolver.resolve(event);
+
+// 2. Check admin routing mode
+const isAdminOnly = event.recipients?.admin_only === true;
+const isAdminEligible = ADMIN_ELIGIBLE_EVENTS.has(event.event_type);
+
+// 3a. Admin-only mode: skip user routing
+if (isAdminOnly) {
+  await enqueueToAdminChannel(event, resolvedData);
+  return;
+}
+
+// 3b. Standard user routing
+for (const recipient of resolvedData) {
+  const prefs = await loadNotificationPreferences(recipient.user_id);
+  await routeToChannels(recipient, prefs, event, resolvedData);
+}
+
+// 3c. Dual routing: also send to admin if eligible
+if (isAdminEligible) {
+  await enqueueToAdminChannel(event, resolvedData);
+}
+```
+
+### Admin Channel Payload Structure
+
+The admin channel receives the same enriched data structure as other channels:
+
+```javascript
+{
+  event: {  // Original EventBridge detail
+    event_id: "evt_123",
+    event_type: "haul.booking.created",
+    occurred_at: "2026-01-10T...",
+    actor: { /* ... */ },
+    recipients: { /* ... */ },
+    entity: { /* ... */ },
+    context: { /* ... */ }
+  },
+  resolvedData: {  // Enriched by resolver
+    recipients: [{ user_id, metadata }],
+    jobDetails: { /* from DB */ },
+    companyDetails: { /* from DB */ },
+    // Any other resolver-added data
+  }
+}
+```
+
+### Admin Channel Handler Location
+
+```
+functions/channels/admin/
+  - handler.js
+  - serverless.yml
+```
+
+### Adding New Admin-Eligible Events
+
+To make an existing event type send to the admin channel:
+
+1. Add the event type to `ADMIN_ELIGIBLE_EVENTS` in `functions/orchestrator/admin-event-registry.js`
+2. No changes required to producer services
+3. No changes required to resolvers
+4. No schema changes required
+
+### Security Considerations
+
+- The `admin_only` flag is part of the validated EventBridge detail payload
+- Only producer services can set this flag (users cannot trigger admin-only events)
+- All admin events are logged in EventBridge with full audit trail
+- Admin channel endpoints should be secured via environment variables
+- No user PII filtering is applied to admin events (internal use only)
 
 ---
 
