@@ -39,7 +39,7 @@ provider:
     REDIS_PASSWORD: ${ssm:/haul/${sls:stage}/redis/password}
     LOCATION_UPDATE_TOPIC_ARN: ${ssm:/haul/${sls:stage}/sns/location-updates-topic-arn}
     GOOGLE_PLACES_API_KEY: ${ssm:/haul/${sls:stage}/google/places-api-key}
-    SLACK_NOTIFICATIONS_WEBHOOK_URL: ${ssm:/haul/slack/haul-notifications-webhook}
+    SLACK_NOTIFICATIONS_WEBHOOK_URL: ${ssm:/haul/slack/haul-notifications-webhook-url}
   iam:
       role:
         statements:

@@ -150,6 +150,19 @@ function normalizePropertyType(propertyType) {
 }
 
 /**
+ * Normalize job type
+ */
+function normalizeJobType(dataType) {
+  if (!dataType) return 'Not specified';
+  const typeMap = {
+    'JUNK_REMOVAL': 'Junk Removal',
+    'MOVE_SMALL': 'Small Move',
+    'MOVE_STORAGE': 'Storage Move',
+  };
+  return typeMap[dataType] || dataType;
+}
+
+/**
  * Build Slack message for haul.job.posted
  */
 function buildJobPostedSlackMessage(message) {
@@ -160,6 +173,7 @@ function buildJobPostedSlackMessage(message) {
   const data = notification_content.data || {};
   
   const propertyType = normalizePropertyType(data.property_type);
+  const jobType = normalizeJobType(data.job_type);
   const address = formatAddress(data.service_address);
   const unit = data.unit ? `Unit ${data.unit}` : '';
   const addressWithUnit = unit ? `${address}, ${unit}` : address;
@@ -183,7 +197,7 @@ function buildJobPostedSlackMessage(message) {
         type: 'header',
         text: {
           type: 'plain_text',
-          text: `🔔 New Job Posted (${env})`,
+          text: `🔔 New ${jobType} Job Posted (${env})`,
           emoji: true
         }
       },
@@ -199,15 +213,15 @@ function buildJobPostedSlackMessage(message) {
           {
             type: 'rich_text_section',
             elements: [
-              { type: 'text', text: 'Property Type: ', style: { bold: true } },
-              { type: 'text', text: propertyType }
+              { type: 'text', text: 'Address: ', style: { bold: true } },
+              { type: 'text', text: addressWithUnit }
             ]
           },
           {
             type: 'rich_text_section',
             elements: [
-              { type: 'text', text: 'Address: ', style: { bold: true } },
-              { type: 'text', text: addressWithUnit }
+              { type: 'text', text: 'Property Type: ', style: { bold: true } },
+              { type: 'text', text: propertyType }
             ]
           },
           {
@@ -244,6 +258,7 @@ function buildBidCreatedSlackMessage(message) {
   const quotedAmount = data.bid_amount_formatted 
     || (data.bid_amount_usd_cents || data.amount_usd_cents ? formatCurrency(data.bid_amount_usd_cents || data.amount_usd_cents) : 'Not specified');
   const companyName = data.company_name || 'Unknown company';
+  const jobType = normalizeJobType(data.job_type);
   const address = data.location_formatted || formatAddress(data.service_address);
   const unit = data.unit ? `Unit ${data.unit}` : '';
   const addressWithUnit = unit ? `${address}, ${unit}` : address;
@@ -266,7 +281,7 @@ function buildBidCreatedSlackMessage(message) {
         type: 'header',
         text: {
           type: 'plain_text',
-          text: `💰 New Bid Created (${env})`,
+          text: `💰 New ${jobType} Bid Created (${env})`,
           emoji: true
         }
       },
@@ -335,6 +350,7 @@ function buildBookingCreatedSlackMessage(message) {
   const bookedAmount = data.booking_amount_formatted 
     || (data.amount_usd_cents ? formatCurrency(data.amount_usd_cents) : 'Not specified');
   const companyName = data.company_name || 'Unknown company';
+  const jobType = normalizeJobType(data.job_type);
   const address = data.location_formatted || formatAddress(data.service_address);
   const unit = data.unit ? `Unit ${data.unit}` : '';
   const addressWithUnit = unit ? `${address}, ${unit}` : address;
@@ -352,7 +368,7 @@ function buildBookingCreatedSlackMessage(message) {
         type: 'header',
         text: {
           type: 'plain_text',
-          text: `✅ Booking Created (${env})`,
+          text: `✅ ${jobType} Booking Created (${env})`,
           emoji: true
         }
       },
