@@ -9,7 +9,9 @@ const {
   buildBidUpdatedEmail,
   buildBookingCreatedEmail,
   buildBookingAssignedCustomerEmail,
-  buildBookingAssignedDriverEmail
+  buildBookingAssignedDriverEmail,
+  buildBookingInProgressEmail,
+  buildBookingInProgressDropoffEmail
 } = require('./templates');
 
 const sesClient = new SESv2Client({ region: process.env.REGION });
@@ -184,6 +186,12 @@ function renderEmailTemplate(eventType, data) {
         console.error('[renderEmailTemplate] Unknown recipient_type for booking.assigned:', data.recipient_type, 'Available data keys:', Object.keys(data));
         return null;
       }
+    
+    case 'haul.booking.in_progress_pickup':
+      return buildBookingInProgressEmail(data);
+    
+    case 'haul.booking.in_progress_dropoff':
+      return buildBookingInProgressDropoffEmail(data);
     
     default:
       console.warn('[EmailChannel] No template for event type, using fallback', { event_type: eventType });

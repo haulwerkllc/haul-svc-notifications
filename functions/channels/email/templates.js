@@ -303,7 +303,7 @@ function normalizePropertyType(propertyType) {
 /**
  * Format timing preference for display
  */
-function formatTimingPreference(timingPreference, preferredPickupWindowStart, preferredPickupWindowEnd) {
+function formatTimingPreference(timingPreference, preferredPickupWindowStart, preferredPickupWindowEnd, timezone) {
   if (timingPreference === 'FLEXIBLE') {
     return 'Flexible';
   }
@@ -312,28 +312,34 @@ function formatTimingPreference(timingPreference, preferredPickupWindowStart, pr
     const startDate = new Date(preferredPickupWindowStart);
     const endDate = new Date(preferredPickupWindowEnd);
     
-    const formatDate = (date) => {
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric',
-        year: 'numeric'
-      });
+    const dateOptions = { 
+      month: 'short', 
+      day: 'numeric',
+      year: 'numeric'
     };
     
-    const formatTime = (date) => {
-      return date.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit',
-        hour12: true 
-      });
+    const timeOptions = { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
     };
     
-    // If same day, show date once
-    if (startDate.toDateString() === endDate.toDateString()) {
-      return `${formatDate(startDate)}, ${formatTime(startDate)} - ${formatTime(endDate)}`;
+    if (timezone) {
+      dateOptions.timeZone = timezone;
+      timeOptions.timeZone = timezone;
     }
     
-    return `${formatDate(startDate)} ${formatTime(startDate)} - ${formatDate(endDate)} ${formatTime(endDate)}`;
+    const startDateStr = startDate.toLocaleDateString('en-US', dateOptions);
+    const endDateStr = endDate.toLocaleDateString('en-US', dateOptions);
+    const startTimeStr = startDate.toLocaleTimeString('en-US', timeOptions);
+    const endTimeStr = endDate.toLocaleTimeString('en-US', timeOptions);
+    
+    // If same day, show date once
+    if (startDateStr === endDateStr) {
+      return `${startDateStr}, ${startTimeStr} - ${endTimeStr}`;
+    }
+    
+    return `${startDateStr} ${startTimeStr} - ${endDateStr} ${endTimeStr}`;
   }
   
   return timingPreference?.charAt(0).toUpperCase() + timingPreference?.slice(1).toLowerCase() || 'Not specified';
@@ -959,12 +965,14 @@ function buildBookingAssignedCustomerEmail(data) {
   const companyName = data.company_name || 'the service provider';
   const driverName = data.driver_given_name || 'your crew leader';
   const logoUrl = data.logo_url;
+  const timezone = data.service_location_timezone;
   
   // Format pickup window
   const pickupWindow = formatTimingPreference(
     'SCHEDULED',
     data.pickup_window_start,
-    data.pickup_window_end
+    data.pickup_window_end,
+    timezone
   );
 
   const subject = `Crew assigned to booking ${bookingNumber}`;
@@ -1048,12 +1056,14 @@ function buildBookingAssignedDriverEmail(data) {
   const unit = data.unit ? `, ${data.unit}` : '';
   const companyName = data.company_name || 'your company';
   const logoUrl = data.logo_url;
+  const timezone = data.service_location_timezone;
   
   // Format pickup window
   const pickupWindow = formatTimingPreference(
     'SCHEDULED',
     data.pickup_window_start,
-    data.pickup_window_end
+    data.pickup_window_end,
+    timezone
   );
 
   const subject = `You've been assigned to booking ${bookingNumber}`;
@@ -1118,6 +1128,190 @@ function buildBookingAssignedDriverEmail(data) {
 }
 
 /**
+ * Build booking in progress email for CUSTOMER
+ * Notifies customer that their service has started and the crew is en route
+ */
+function buildBookingInProgressEmail(data) {
+  console.log('[buildBookingInProgressEmail] Received data:', JSON.stringify(data, null, 2));
+  
+  const bookingNumber = data.booking_number || 'N/A';
+  const location = formatAddress(data.service_address);
+  const unit = data.unit ? `, ${data.unit}` : '';
+  const companyName = data.company_name || 'your service provider';
+  const driverName = data.driver_given_name || 'Your crew';
+  const logoUrl = data.logo_url;
+  const timezone = data.service_location_timezone;
+  
+  // Format pickup window
+  const pickupWindow = formatTimingPreference(
+    'SCHEDULED',
+    data.pickup_window_start,
+    data.pickup_window_end,
+    timezone
+  );
+  
+  const subject = `Your service has started – Booking ${bookingNumber}`;
+  const preheader = `${driverName} from ${companyName} is on the way.`;
+
+  const bodyContent = `
+    <h1>Your service is underway</h1>
+    <p>${escapeHtml(driverName)} from ${escapeHtml(companyName)} has started your job and is en route to your location.</p>
+    
+    ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}" style="max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;">` : ''}
+    
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Crew leader</span>
+        <span class="detail-value">${escapeHtml(driverName)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Company</span>
+        <span class="detail-value">${escapeHtml(companyName)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}${escapeHtml(unit)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Pickup window</span>
+        <span class="detail-value">${escapeHtml(pickupWindow)}</span>
+      </div>
+    </div>
+    
+    <p>Please ensure access to the service location is available for the crew upon arrival.</p>
+    
+    <div class="cta">
+      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Your service is underway',
+    '',
+    `${driverName} from ${companyName} has started your job and is en route to your location.`,
+    '',
+    `Crew leader: ${driverName}`,
+    `Company: ${companyName}`,
+    `Booking No.: ${bookingNumber}`,
+    `Location: ${location}${unit}`,
+    `Pickup window: ${pickupWindow}`,
+    '',
+    'Please ensure access to the service location is available for the crew upon arrival.',
+    '',
+    `View booking: ${BASE_URL}/bookings`,
+    '',
+    '---',
+    'You received this because your service has started.',
+    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build booking in progress dropoff email for CUSTOMER
+ * Notifies customer that dropoff phase has started (MOVE jobs only)
+ */
+function buildBookingInProgressDropoffEmail(data) {
+  console.log('[buildBookingInProgressDropoffEmail] Received data:', JSON.stringify(data, null, 2));
+  
+  const bookingNumber = data.booking_number || 'N/A';
+  const location = formatAddress(data.destination_address || data.service_address);
+  const unit = data.unit ? `, ${data.unit}` : '';
+  const companyName = data.company_name || 'your service provider';
+  const driverName = data.driver_given_name || 'Your crew';
+  const logoUrl = data.logo_url;
+  const timezone = data.service_location_timezone;
+  
+  // Format pickup window
+  const pickupWindow = formatTimingPreference(
+    'SCHEDULED',
+    data.pickup_window_start,
+    data.pickup_window_end,
+    timezone
+  );
+  
+  const subject = `Dropoff in progress – Booking ${bookingNumber}`;
+  const preheader = `${driverName} from ${companyName} is heading to dropoff location.`;
+
+  const bodyContent = `
+    <h1>Dropoff in progress</h1>
+    <p>${escapeHtml(driverName)} from ${escapeHtml(companyName)} has loaded the items and is now en route to the dropoff location.</p>
+    
+    ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}" style="max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;">` : ''}
+    
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Crew leader</span>
+        <span class="detail-value">${escapeHtml(driverName)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Company</span>
+        <span class="detail-value">${escapeHtml(companyName)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Dropoff location</span>
+        <span class="detail-value">${escapeHtml(location)}${escapeHtml(unit)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Service window</span>
+        <span class="detail-value">${escapeHtml(pickupWindow)}</span>
+      </div>
+    </div>
+    
+    <p>Please ensure access to the dropoff location is available for the crew upon arrival.</p>
+    
+    <div class="cta">
+      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Dropoff in progress',
+    '',
+    `${driverName} from ${companyName} has loaded the items and is now en route to the dropoff location.`,
+    '',
+    `Crew leader: ${driverName}`,
+    `Company: ${companyName}`,
+    `Booking No.: ${bookingNumber}`,
+    `Dropoff location: ${location}${unit}`,
+    `Service window: ${pickupWindow}`,
+    '',
+    'Please ensure access to the dropoff location is available for the crew upon arrival.',
+    '',
+    `View booking: ${BASE_URL}/bookings`,
+    '',
+    '---',
+    'You received this because your dropoff is in progress.',
+    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
  * Escape HTML to prevent XSS
  */
 function escapeHtml(text) {
@@ -1143,6 +1337,8 @@ module.exports = {
   buildBookingCreatedEmail,
   buildBookingAssignedCustomerEmail,
   buildBookingAssignedDriverEmail,
+  buildBookingInProgressEmail,
+  buildBookingInProgressDropoffEmail,
   normalizeJobType,
   normalizePropertyType,
   formatTimingPreference,

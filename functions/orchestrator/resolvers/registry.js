@@ -12,7 +12,8 @@ const BidCreatedResolver = require('./bid_created_resolver');
 const BidUpdatedResolver = require('./bid_updated_resolver');
 const BookingCreatedResolver = require('./booking_created_resolver');
 const BookingAssignedResolver = require('./booking_assigned_resolver');
-const BookingInProgressResolver = require('./booking_in_progress_resolver');
+const BookingInProgressPickupResolver = require('./booking_in_progress_pickup_resolver');
+const BookingInProgressDropoffResolver = require('./booking_in_progress_dropoff_resolver');
 
 // Initialize resolver instances
 const resolvers = [
@@ -23,7 +24,8 @@ const resolvers = [
   new BidUpdatedResolver(),
   new BookingCreatedResolver(),
   new BookingAssignedResolver(),
-  new BookingInProgressResolver()
+  new BookingInProgressPickupResolver(),
+  new BookingInProgressDropoffResolver()
 ];
 
 // Build registry keyed by event_type

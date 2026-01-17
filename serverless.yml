@@ -116,5 +116,4 @@ package:
 
 plugins:
   - serverless-plugin-include-dependencies
-  - serverless-prune-plugin
 

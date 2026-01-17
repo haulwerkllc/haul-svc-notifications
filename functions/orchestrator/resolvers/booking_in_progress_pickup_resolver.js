@@ -11,7 +11,7 @@ const BOOKING_TABLE = process.env.BOOKING_TABLE_NAME;
 const JOB_TABLE = process.env.JOB_TABLE_NAME;
 
 /**
- * Resolver for haul.booking.in_progress events
+ * Resolver for haul.booking.in_progress_pickup events
  * 
  * DELIVERY TARGET: CUSTOMER ONLY
  * 
@@ -26,13 +26,13 @@ const JOB_TABLE = process.env.JOB_TABLE_NAME;
  * 2. Get Job by booking.job_id
  * 3. Return job.owner_user_id as customer
  */
-class BookingInProgressResolver extends NotificationResolver {
+class BookingInProgressPickupResolver extends NotificationResolver {
   getEventType() {
-    return 'haul.booking.in_progress';
+    return 'haul.booking.in_progress_pickup';
   }
 
   async resolve(event) {
-    console.log('[BookingInProgressResolver] Resolving recipients for booking.in_progress event', {
+    console.log('[BookingInProgressPickupResolver] Resolving recipients for booking.in_progress_pickup event', {
       event_id: event.event_id,
       entity_id: event.entity.id
     });
@@ -43,14 +43,14 @@ class BookingInProgressResolver extends NotificationResolver {
       // Step 1: Get booking
       const booking = await this.getBooking(bookingId);
       if (!booking) {
-        console.warn('[BookingInProgressResolver] Booking not found', { booking_id: bookingId });
+        console.warn('[BookingInProgressPickupResolver] Booking not found', { booking_id: bookingId });
         return [];
       }
 
       // Step 2: Get job
       const job = await this.getJob(booking.job_id);
       if (!job) {
-        console.warn('[BookingInProgressResolver] Job not found', { 
+        console.warn('[BookingInProgressPickupResolver] Job not found', { 
           booking_id: bookingId, 
           job_id: booking.job_id 
         });
@@ -59,7 +59,7 @@ class BookingInProgressResolver extends NotificationResolver {
 
       // Step 3: Return customer (job owner)
       if (!job.owner_user_id) {
-        console.warn('[BookingInProgressResolver] Job has no owner_user_id', { 
+        console.warn('[BookingInProgressPickupResolver] Job has no owner_user_id', { 
           booking_id: bookingId,
           job_id: booking.job_id 
         });
@@ -75,14 +75,14 @@ class BookingInProgressResolver extends NotificationResolver {
         }
       ];
 
-      console.log('[BookingInProgressResolver] Resolved recipients', {
+      console.log('[BookingInProgressPickupResolver] Resolved recipients', {
         booking_id: bookingId,
         recipient_count: recipients.length
       });
 
       return recipients;
     } catch (error) {
-      console.error('[BookingInProgressResolver] Error resolving recipients', {
+      console.error('[BookingInProgressPickupResolver] Error resolving recipients', {
         booking_id: bookingId,
         error: error.message
       });
@@ -111,4 +111,4 @@ class BookingInProgressResolver extends NotificationResolver {
   }
 }
 
-module.exports = BookingInProgressResolver;
+module.exports = BookingInProgressPickupResolver;

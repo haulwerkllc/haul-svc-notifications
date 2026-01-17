@@ -9,8 +9,7 @@
   },
   "devDependencies": {
     "serverless": "4.25.0",
-    "serverless-plugin-include-dependencies": "^6.1.1",
-    "serverless-prune-plugin": "^2.1.0"
+    "serverless-plugin-include-dependencies": "^6.1.1"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",

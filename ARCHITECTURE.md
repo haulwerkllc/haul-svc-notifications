@@ -349,7 +349,7 @@ The following will be the reserved namespaces:
 
 `haul.booking.created` → provider
 `haul.booking.assigned` → customer
-`haul.booking.in_progress` → customer (push/SMS candidate)
+`haul.booking.in_progress_pickup` → customer (push/SMS candidate)
 `haul.booking.pending_confirmation` → customer + crew
 `haul.booking.completed` → customer + provider
 `haul.booking.canceled` → both

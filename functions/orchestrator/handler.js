@@ -236,8 +236,11 @@ async function constructNotificationContent(event) {
     case 'haul.booking.assigned':
       return constructBookingAssignedNotification(event);
     
-    case 'haul.booking.in_progress':
-      return constructBookingInProgressNotification(event);
+    case 'haul.booking.in_progress_pickup':
+      return constructBookingInProgressPickupNotification(event);
+    
+    case 'haul.booking.in_progress_dropoff':
+      return constructBookingInProgressDropoffNotification(event);
     
     default:
       console.warn('[Orchestrator] No content constructor for event type', { event_type });
@@ -909,22 +912,43 @@ function constructBookingAssignedNotification(event) {
 }
 
 /**
- * Construct notification content for haul.booking.in_progress events
+ * Construct notification content for haul.booking.in_progress_pickup events
  * Recipients: Customer
  * 
  * This event already contains all necessary data in event.context.
  */
-function constructBookingInProgressNotification(event) {
+function constructBookingInProgressPickupNotification(event) {
   const bookingNumber = event.context?.booking_number || 'N/A';
   
   return {
     subject: `Your service has started – Booking ${bookingNumber}`,
-    body: `Your service provider has started working on your booking.`,
+    body: `Your service provider has started pickup for your booking.`,
     entity: {
       id: event.entity.id,
       type: 'booking'
     },
     data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.in_progress_dropoff events
+ * Recipients: Customer
+ * 
+ * This event already contains all necessary data in event.context.
+ */
+function constructBookingInProgressDropoffNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  
+  return {
+    subject: `Dropoff in progress – Booking ${bookingNumber}`,
+    body: `Your service provider is en route to the dropoff location.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
   };
 }
 
