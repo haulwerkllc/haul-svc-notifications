@@ -170,13 +170,20 @@ They do not know how notifications are delivered.
 
 ### EventBridge Routing Rule
 
-A single EventBridge rule defined in central Terraform routes **all** `haul.*` events to the notifications orchestrator:
+A single EventBridge rule defined in central Terraform routes **all** `haul.*` events with `notify: true` to the notifications orchestrator:
 
 ```
 rule_name = "notifications-${var.env}"
+
+event_pattern = {
+  source = [{ prefix = "haul." }],
+  detail = {
+    notify = [true]
+  }
+}
 ```
 
-This rule uses a wildcard pattern to match all events with a `detail-type` starting with `haul.`. No additional EventBridge rules are required when adding new event types — simply implement a resolver in the orchestrator.
+This rule filters events to only those that should trigger notifications. Producer services MUST include `notify: true` in the event detail when emitting notification-eligible events. No additional EventBridge rules are required when adding new event types — simply implement a resolver in the orchestrator.
 
 ---
 
@@ -395,9 +402,11 @@ Example:
 
 - This schema is the single source of truth for notification ingress.
 - Claude MUST NOT invent additional required fields.
+- All notification-eligible events MUST include `notify: true` in the detail to be routed by EventBridge.
 
 ```
 {
+  "notify": true,  // REQUIRED: Triggers EventBridge routing to notifications service
   "event_id": "evt_123",
   "event_type": "haul.job.posted",
   "occurred_at": "ISO-8601 timestamp",
