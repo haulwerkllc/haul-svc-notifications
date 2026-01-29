@@ -1,5 +1,19 @@
 Resources:
   # ================================
+  # Lambda Permissions (Resource-Based Policies)
+  # ================================
+
+  # Allow EventBridge to invoke the orchestrator Lambda
+  # Source ARN constructed from known rule naming convention in Terraform
+  OrchestratorEventBridgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt NotificationsOrchestratorLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/notifications-${sls:stage}
+
+  # ================================
   # IAM Policies for Notification Service
   # ================================
 

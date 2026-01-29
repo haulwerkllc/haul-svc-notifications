@@ -949,7 +949,6 @@ function constructBookingInProgressDropoffNotification(event) {
     },
     data: event.context || {}
   };
-  };
 }
 
 /**
