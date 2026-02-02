@@ -23,10 +23,11 @@ const sampleJobData = {
   preferred_pickup_window_start: '2026-01-10T14:00:00Z',
   preferred_pickup_window_end: '2026-01-10T16:00:00Z',
   service_address: {
-    street: '123 Main St',
+    line_1: '123 Main St',
     city: 'Los Angeles',
     state: 'CA',
-    zip: '90012'
+    postal_code: '90012',
+    country: 'USA'
   },
   description: 'Need to remove old furniture from garage. Includes 2 couches, 1 coffee table, and misc boxes. Must be able to navigate narrow driveway.'
 };

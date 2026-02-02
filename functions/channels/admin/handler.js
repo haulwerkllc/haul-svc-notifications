@@ -418,16 +418,32 @@ function buildBookingCreatedSlackMessage(message) {
 
 /**
  * Format address object to readable string
+ * Supports both legacy {street,city,state,zip} and new {line_1,line_2,city,state,postal_code,country} formats
  */
 function formatAddress(address) {
   if (!address) return 'Not specified';
   if (typeof address === 'string') return address;
 
   const parts = [];
-  if (address.street) parts.push(address.street);
+  
+  // New format: line_1, line_2, city, state, postal_code, country
+  if (address.line_1) {
+    parts.push(address.line_1);
+    if (address.line_2) parts.push(address.line_2);
+  } else if (address.street) {
+    // Legacy format: street, city, state, zip
+    parts.push(address.street);
+  }
+  
   if (address.city) parts.push(address.city);
   if (address.state) parts.push(address.state);
-  if (address.zip) parts.push(address.zip);
+  
+  // Postal code (new format) or zip (legacy format)
+  if (address.postal_code) {
+    parts.push(address.postal_code);
+  } else if (address.zip) {
+    parts.push(address.zip);
+  }
 
   return parts.length > 0 ? parts.join(', ') : 'Not specified';
 }
