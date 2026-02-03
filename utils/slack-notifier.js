@@ -10,17 +10,22 @@ const https = require('https');
 /**
  * Post a message to Slack via webhook
  * @param {Object} payload - Slack Block Kit payload (must include 'blocks' or 'text')
+ * @param {string} channel - Channel to post to: 'notifications' (default) or 'transfers'
  * @returns {Promise<void>}
  * @throws {Error} If webhook URL is not configured or POST fails
  */
-async function postToSlack(payload) {
-  const webhookUrl = process.env.SLACK_NOTIFICATIONS_WEBHOOK_URL;
+async function postToSlack(payload, channel = 'notifications') {
+  const webhookUrl = process.env.SLACK_NOTIFICATIONS_CHANNEL_WEBHOOK_URL;
+  const transfersWebhookUrl = process.env.SLACK_TRANSFERS_CHANNEL_WEBHOOK_URL;
 
-  if (!webhookUrl) {
-    throw new Error('SLACK_NOTIFICATIONS_WEBHOOK_URL not configured');
+  if (!webhookUrl || !transfersWebhookUrl) {
+    throw new Error('Slack webhook URLs not configured');
   }
 
-  const url = new URL(webhookUrl);
+  // Route to appropriate webhook based on channel
+  const targetWebhookUrl = channel === 'transfers' ? transfersWebhookUrl : webhookUrl;
+  const url = new URL(targetWebhookUrl);
+
   const postData = JSON.stringify(payload);
 
   const options = {

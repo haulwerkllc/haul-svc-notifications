@@ -21,7 +21,9 @@
 const ADMIN_ELIGIBLE_EVENTS = new Set([
   'haul.job.posted',
   'haul.bid.created',
-  'haul.booking.created'
+  'haul.booking.created',
+  'haul.transfer.completed',
+  'haul.transfer.failed',
 ]);
 
 /**

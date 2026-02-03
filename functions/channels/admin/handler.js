@@ -77,7 +77,13 @@ async function processAdminNotification(message) {
   const { event_type } = message;
 
   // Only process specific event types
-  const supportedEvents = ['haul.job.posted', 'haul.bid.created', 'haul.booking.created'];
+  const supportedEvents = [
+    'haul.job.posted',
+    'haul.bid.created',
+    'haul.booking.created',
+    'haul.transfer.completed',
+    'haul.transfer.failed'
+  ];
   
   if (!supportedEvents.includes(event_type)) {
     console.log('[AdminChannel] Event type not configured for Slack notifications', { event_type });
@@ -92,14 +98,19 @@ async function processAdminNotification(message) {
     return;
   }
 
+  // Determine target Slack channel based on event type
+  const transferEvents = ['haul.transfer.completed', 'haul.transfer.failed'];
+  const channel = transferEvents.includes(event_type) ? 'transfers' : 'notifications';
+
   // Send to Slack
   try {
-    await postToSlack(slackPayload);
-    console.log('[AdminChannel] Successfully posted to Slack', { event_type });
+    await postToSlack(slackPayload, channel);
+    console.log('[AdminChannel] Successfully posted to Slack', { event_type, channel });
   } catch (error) {
     // Log but don't throw - Slack notifications are non-blocking
     console.error('[AdminChannel] Failed to post to Slack', {
       event_type,
+      channel,
       error: error.message
     });
   }
@@ -120,6 +131,10 @@ function buildSlackMessage(message) {
       return buildBidCreatedSlackMessage(message);
     case 'haul.booking.created':
       return buildBookingCreatedSlackMessage(message);
+    case 'haul.transfer.completed':
+      return buildTransferCompletedSlackMessage(message);
+    case 'haul.transfer.failed':
+      return buildTransferFailedSlackMessage(message);
     default:
       return null;
   }
@@ -522,4 +537,143 @@ function formatDateTime(isoString, timezone) {
   };
 
   return date.toLocaleString('en-US', options);
+}
+
+/**
+ * Build Slack message for haul.transfer.completed
+ */
+function buildTransferCompletedSlackMessage(message) {
+  const { notification_content } = message;
+  const env = formatEnvironment(process.env.ENV);
+
+  // Extract data from notification_content.data
+  const data = notification_content.data || {};
+  
+  const transferAmount = formatCurrency(data.transfer_amount_cents);
+  const bookingId = data.booking_id || 'Unknown';
+  const transferId = data.transfer_id || 'Unknown';
+  const companyName = data.company_name || 'Unknown company';
+  const timestamp = data.timestamp ? formatDateTime(data.timestamp) : 'Just now';
+
+  return {
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `💸 Transfer Completed (${env})`,
+          emoji: true
+        }
+      },
+      {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Booking ID: ', style: { bold: true } },
+              { type: 'text', text: bookingId }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Transfer ID: ', style: { bold: true } },
+              { type: 'text', text: transferId }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Transfer Amount: ', style: { bold: true } },
+              { type: 'text', text: transferAmount }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Company: ', style: { bold: true } },
+              { type: 'text', text: companyName }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Timestamp: ', style: { bold: true } },
+              { type: 'text', text: timestamp }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Build Slack message for haul.transfer.failed
+ */
+function buildTransferFailedSlackMessage(message) {
+  const { notification_content } = message;
+  const env = formatEnvironment(process.env.ENV);
+
+  // Extract data from notification_content.data
+  const data = notification_content.data || {};
+  
+  const bookingId = data.booking_id || 'Unknown';
+  const attempt = data.attempt !== undefined ? data.attempt : 'Unknown';
+  const errorMessage = data.error_message || 'Unknown error';
+  const timestamp = data.timestamp ? formatDateTime(data.timestamp) : 'Just now';
+
+  return {
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `❌ Transfer Failed - Manual Intervention Required (${env})`,
+          emoji: true
+        }
+      },
+      {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Booking ID: ', style: { bold: true } },
+              { type: 'text', text: bookingId }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Retry Attempts: ', style: { bold: true } },
+              { type: 'text', text: `${attempt} (max reached)` }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Error: ', style: { bold: true } },
+              { type: 'text', text: errorMessage }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Timestamp: ', style: { bold: true } },
+              { type: 'text', text: timestamp }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: '\n⚠️ Action Required: ', style: { bold: true } },
+              { type: 'text', text: 'Invoices remain in PAID_PENDING_RELEASE status. Manual release or refund required.' }
+            ]
+          }
+        ]
+      }
+    ]
+  };
 }

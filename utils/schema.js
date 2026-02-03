@@ -18,9 +18,8 @@ const VALID_EVENT_TYPES = [
   'haul.booking.pending_confirmation',
   'haul.booking.completed',
   'haul.booking.canceled',
-  'haul.company.*',
-  'haul.user.*',
-  'haul.payment.*'
+  'haul.transfer.completed',
+  'haul.transfer.failed',
 ];
 
 /**
