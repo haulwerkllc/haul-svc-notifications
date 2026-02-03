@@ -463,7 +463,7 @@ Events that should ONLY be sent to the admin channel and skip all user notificat
 ```javascript
 await eventBridge.putEvents({
   Entries: [{
-    Source: 'haul.jobs',
+    Source: 'haul.notifications',
     DetailType: 'haul.job.flagged_for_review',
     Detail: JSON.stringify({
       event_id: 'evt_123',
@@ -510,7 +510,7 @@ Producer services emit standard events (no special flags required):
 ```javascript
 await eventBridge.putEvents({
   Entries: [{
-    Source: 'haul.bookings',
+    Source: 'haul.notifications',
     DetailType: 'haul.booking.created',
     Detail: JSON.stringify({
       event_id: 'evt_456',
