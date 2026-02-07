@@ -106,7 +106,7 @@ async function sendEmailNotification(message) {
   // Send via SES v2
   try {
     const params = {
-      FromEmailAddress: FROM_ADDRESS,
+      FromEmailAddress: `Haul Notifications <${FROM_ADDRESS}>`,
       Destination: {
         ToAddresses: [recipientEmail]
       },
