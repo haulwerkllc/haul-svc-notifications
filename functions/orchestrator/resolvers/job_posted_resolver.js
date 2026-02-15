@@ -11,7 +11,9 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient, {
 });
 
 const JOB_TABLE = process.env.JOB_TABLE_NAME;
-const OPENSEARCH_ENDPOINT = process.env.OPENSEARCH_ENDPOINT;
+const OPENSEARCH_ENDPOINT = process.env.OPENSEARCH_ENDPOINT?.startsWith('https://') 
+  ? process.env.OPENSEARCH_ENDPOINT 
+  : `https://${process.env.OPENSEARCH_ENDPOINT}`;
 
 // Roles eligible to receive job notifications
 const ELIGIBLE_ROLES = ['OWNER', 'ADMIN', 'DISPATCHER'];
