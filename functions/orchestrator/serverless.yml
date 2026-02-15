@@ -5,11 +5,11 @@ notificationsOrchestrator:
   memorySize: 512
   timeout: 30
   vpc:
-    subnetIds: ${self:custom.env.OPENSEARCH_VPC_SUBNET_IDS, ''}
+    subnetIds: ${self:provider.environment.OPENSEARCH_VPC_SUBNET_IDS, ''}
     securityGroupIds:
-      - ${self:custom.env.OPENSEARCH_VPC_SECURITY_GROUP_ID, ''}
+      - ${self:provider.environment.OPENSEARCH_VPC_SECURITY_GROUP_ID, ''}
   environment:
-    OPENSEARCH_ENDPOINT: ${self:custom.env.OPENSEARCH_ENDPOINT}
+    OPENSEARCH_ENDPOINT: ${self:provider.environment.OPENSEARCH_ENDPOINT}
     EMAIL_QUEUE_URL:
       Ref: EmailChannelQueue
     PUSH_QUEUE_URL:

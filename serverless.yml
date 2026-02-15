@@ -42,6 +42,9 @@ provider:
     GOOGLE_PLACES_API_KEY: ${ssm:/haul/${sls:stage}/google/places-api-key}
     SLACK_NOTIFICATIONS_CHANNEL_WEBHOOK_URL: ${ssm:/haul/slack/haul-notifications-webhook-url}
     SLACK_TRANSFERS_CHANNEL_WEBHOOK_URL: ${ssm:/haul/slack/haul-transfers-webhook-url}
+    OPENSEARCH_ENDPOINT: ${ssm:/haul/${sls:stage}/opensearch/endpoint}
+    OPENSEARCH_VPC_SUBNET_IDS: ${ssm:/haul/${sls:stage}/opensearch/subnet-ids}
+    OPENSEARCH_VPC_SECURITY_GROUP_ID: ${ssm:/haul/${sls:stage}/opensearch/security-group-id}
   iam:
       role:
         statements:
