@@ -242,6 +242,9 @@ async function constructNotificationContent(event) {
     case 'haul.booking.in_progress_dropoff':
       return constructBookingInProgressDropoffNotification(event);
     
+    case 'haul.booking.rescheduled':
+      return constructBookingRescheduledNotification(event);
+    
     default:
       console.warn('[Orchestrator] No content constructor for event type', { event_type });
       return {
@@ -958,6 +961,26 @@ function constructBookingInProgressDropoffNotification(event) {
   return {
     subject: `Dropoff in progress – Booking ${bookingNumber}`,
     body: `Your service provider is en route to the dropoff location.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.rescheduled events
+ * Recipients: Customer only
+ * 
+ * This event already contains all necessary data in event.context.
+ */
+function constructBookingRescheduledNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  
+  return {
+    subject: `Booking ${bookingNumber} has been rescheduled`,
+    body: `Your service provider has updated the pickup time for your booking.`,
     entity: {
       id: event.entity.id,
       type: 'booking'

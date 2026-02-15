@@ -146,13 +146,14 @@ const recipients = await resolveUsersByCompanyRole({
 
 This service owns:
 
-- EventBridge rules  
 - SQS queues + DLQs  
 - Lambda functions  
 - IAM execution roles  
 - SES identities  
 - Pinpoint application + channels  
 - CloudWatch alarms  
+
+**Note:** EventBridge routing rule is defined in **central Haul Terraform** (`haul-infra-main/environments/{env}/main.tf`), not in this service.
 
 Shared DynamoDB tables are read via env variables defined in serverless.yml
 

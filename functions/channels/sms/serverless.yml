@@ -11,3 +11,10 @@ smsChannelHandler:
             - SmsChannelQueue
             - Arn
         batchSize: 10
+
+smsInboundHandler:
+  handler: functions/channels/sms/sms_inbound_handler.handler
+  name: haul-svc-notifications-sms-inbound-${sls:stage}
+  description: Handles inbound SMS for opt-out, opt-in, and help requests
+  memorySize: 256
+  timeout: 30

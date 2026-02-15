@@ -22,6 +22,7 @@ provider:
     SUPPORT_EMAIL: ${self:custom.env.SUPPORT_EMAIL}
     NOTIFICATION_PREFERENCE_TABLE_NAME: NotificationPreference-${sls:stage}
     NOTIFICATION_INBOX_TABLE_NAME: NotificationInbox-${sls:stage}
+    SMS_SUPRESSION_TABLE_NAME: SmsSuppression-${sls:stage}
     DEVICE_ENDPOINT_TABLE_NAME: DeviceEndpoint-${sls:stage}
     JOB_TABLE_NAME: Job-${sls:stage}
     BID_TABLE_NAME: Bid-${sls:stage}
@@ -74,6 +75,8 @@ provider:
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/CompanyRole-${sls:stage}/*
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/User-${sls:stage}
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/User-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/SmsSuppression-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/SmsSuppression-${sls:stage}/*
           - Effect: Allow
             Action:
               - es:ESHttpGet

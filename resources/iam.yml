@@ -13,6 +13,16 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/notifications-${sls:stage}
 
+  # Allow SNS to invoke the SMS inbound handler Lambda
+  # Source ARN constructed from known SNS topic naming convention in Terraform
+  SmsInboundSNSPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SmsInboundHandlerLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:haul-sms-inbound-${sls:stage}
+
   # ================================
   # IAM Policies for Notification Service
   # ================================

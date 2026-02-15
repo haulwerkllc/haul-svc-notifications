@@ -11,7 +11,8 @@ const {
   buildBookingAssignedCustomerEmail,
   buildBookingAssignedDriverEmail,
   buildBookingInProgressEmail,
-  buildBookingInProgressDropoffEmail
+  buildBookingInProgressDropoffEmail,
+  buildBookingRescheduledEmail
 } = require('./templates');
 
 const sesClient = new SESv2Client({ region: process.env.REGION });
@@ -192,6 +193,9 @@ function renderEmailTemplate(eventType, data) {
     
     case 'haul.booking.in_progress_dropoff':
       return buildBookingInProgressDropoffEmail(data);
+    
+    case 'haul.booking.rescheduled':
+      return buildBookingRescheduledEmail(data);
     
     default:
       console.warn('[EmailChannel] No template for event type, using fallback', { event_type: eventType });

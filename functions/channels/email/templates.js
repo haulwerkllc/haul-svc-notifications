@@ -1328,6 +1328,115 @@ function buildBookingInProgressDropoffEmail(data) {
 }
 
 /**
+ * Build booking rescheduled email for CUSTOMER
+ * Notifies customer that the service provider has updated the pickup window
+ */
+function buildBookingRescheduledEmail(data) {
+  console.log('[buildBookingRescheduledEmail] Received data:', JSON.stringify(data, null, 2));
+  
+  const bookingNumber = data.booking_number || 'N/A';
+  const location = formatAddress(data.service_address);
+  const unit = data.unit ? `, ${data.unit}` : '';
+  const companyName = data.company_name || 'your service provider';
+  const logoUrl = data.logo_url;
+  const timezone = data.service_location_timezone;
+  
+  // Format new pickup window
+  const newPickupWindow = formatTimingPreference(
+    'SCHEDULED',
+    data.pickup_window_start,
+    data.pickup_window_end,
+    timezone
+  );
+
+  // Format previous pickup window if available
+  let previousPickupWindow = null;
+  if (data.previous_pickup_window_start && data.previous_pickup_window_end) {
+    previousPickupWindow = formatTimingPreference(
+      'SCHEDULED',
+      data.previous_pickup_window_start,
+      data.previous_pickup_window_end,
+      timezone
+    );
+  }
+
+  const subject = 'Your booking has been rescheduled';
+  const preheader = 'Your service provider has updated the pickup time.';
+
+  const bodyContent = `
+    <h1>Your booking has been rescheduled</h1>
+    <p>${escapeHtml(companyName)} has updated the pickup time for your booking.</p>
+    
+    ${logoUrl ? `<img src=\"${escapeHtml(logoUrl)}\" alt=\"${escapeHtml(companyName)}\" style=\"max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;\">` : ''}
+    
+    <div style=\"margin: 24px 0;\">
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Booking No.</span>
+        <span class=\"detail-value\">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Company</span>
+        <span class=\"detail-value\">${escapeHtml(companyName)}</span>
+      </div>
+      <div class=\"detail-row\">
+        <span class=\"detail-label\">Location</span>
+        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+      </div>
+      ${previousPickupWindow ? `
+      <div class=\"detail-row\" style=\"text-decoration: line-through; opacity: 0.6;\">
+        <span class=\"detail-label\">Previous pickup</span>
+        <span class=\"detail-value\">${escapeHtml(previousPickupWindow)}</span>
+      </div>` : ''}
+      <div class=\"detail-row\" style=\"font-weight: 500;\">
+        <span class=\"detail-label\">New pickup window</span>
+        <span class=\"detail-value\">${escapeHtml(newPickupWindow)}</span>
+      </div>
+    </div>
+    
+    <p>If you have any questions about the new schedule, please contact ${escapeHtml(companyName)} directly.</p>
+    
+    <div class=\"cta\">
+      <a href=\"${BASE_URL}/bookings\" class=\"cta-button\" style=\"color:#ffffff !important;text-decoration:none;\">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Your booking has been rescheduled',
+    '',
+    `${companyName} has updated the pickup time for your booking.`,
+    '',
+    `Booking No.: ${bookingNumber}`,
+    `Company: ${companyName}`,
+    `Location: ${location}${unit}`,
+  ];
+
+  if (previousPickupWindow) {
+    textParts.push(`Previous pickup: ${previousPickupWindow}`);
+  }
+  
+  textParts.push(
+    `New pickup window: ${newPickupWindow}`,
+    '',
+    `If you have any questions about the new schedule, please contact ${companyName} directly.`,
+    '',
+    `View booking: ${BASE_URL}/bookings`,
+    '',
+    '---',
+    'You received this because your booking was rescheduled.',
+    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  );
+
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
  * Escape HTML to prevent XSS
  */
 function escapeHtml(text) {
@@ -1355,6 +1464,7 @@ module.exports = {
   buildBookingAssignedDriverEmail,
   buildBookingInProgressEmail,
   buildBookingInProgressDropoffEmail,
+  buildBookingRescheduledEmail,
   normalizeJobType,
   normalizePropertyType,
   formatTimingPreference,

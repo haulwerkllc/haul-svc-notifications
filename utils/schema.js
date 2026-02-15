@@ -13,6 +13,7 @@ const VALID_EVENT_TYPES = [
   'haul.bid.updated',
   'haul.booking.created',
   'haul.booking.assigned',
+  'haul.booking.rescheduled',
   'haul.booking.in_progress_pickup',
   'haul.booking.in_progress_dropoff',
   'haul.booking.pending_confirmation',

@@ -14,6 +14,7 @@ const BookingCreatedResolver = require('./booking_created_resolver');
 const BookingAssignedResolver = require('./booking_assigned_resolver');
 const BookingInProgressPickupResolver = require('./booking_in_progress_pickup_resolver');
 const BookingInProgressDropoffResolver = require('./booking_in_progress_dropoff_resolver');
+const BookingRescheduledResolver = require('./booking_rescheduled_resolver');
 
 // Initialize resolver instances
 const resolvers = [
@@ -25,7 +26,8 @@ const resolvers = [
   new BookingCreatedResolver(),
   new BookingAssignedResolver(),
   new BookingInProgressPickupResolver(),
-  new BookingInProgressDropoffResolver()
+  new BookingInProgressDropoffResolver(),
+  new BookingRescheduledResolver()
 ];
 
 // Build registry keyed by event_type
