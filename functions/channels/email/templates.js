@@ -283,21 +283,9 @@ function buildConsumerTemplate({ subject, preheader, bodyContent, footerNote }) 
 function normalizeJobType(jobType) {
   const map = {
     'JUNK_REMOVAL': 'junk removal',
-    'MOVE_SMALL': 'small-medium moving'
+    'MOVING': 'small-medium moving'
   };
   return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
-}
-
-/**
- * Normalize property type to init caps
- */
-function normalizePropertyType(propertyType) {
-  if (!propertyType) return 'Property';
-  return propertyType
-    .toLowerCase()
-    .split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
 }
 
 /**
@@ -408,7 +396,6 @@ function formatAddress(address) {
  */
 function buildJobPostedEmail(jobData) {
   const jobType = normalizeJobType(jobData.job_type);
-  const propertyType = normalizePropertyType(jobData.property_type);
   const timing = formatTimingPreference(
     jobData.timing_preference,
     jobData.preferred_pickup_window_start,
@@ -419,17 +406,12 @@ function buildJobPostedEmail(jobData) {
   const biddingClosesAt = jobData.bidding_closes_at ? formatBiddingDeadline(jobData.bidding_closes_at, timezone) : null;
   
   const subject = `New ${jobType} job available`;
-  const preheader = `${propertyType} in your service area`;
   
   const bodyContent = `
     <h1>New job posted – submit your bid</h1>
     <p>A ${jobType} job is ready for bids in your service area.</p>
     
     <div style="margin: 24px 0;">
-      <div class="detail-row">
-        <span class="detail-label">Type</span>
-        <span class="detail-value">${escapeHtml(propertyType)}</span>
-      </div>
       <div class="detail-row">
         <span class="detail-label">Location</span>
         <span class="detail-value">${escapeHtml(location)}</span>
@@ -455,7 +437,6 @@ function buildJobPostedEmail(jobData) {
     '',
     `A ${jobType} job is ready for bids in your service area.`,
     '',
-    `Type: ${propertyType}`,
     `Location: ${location}`,
     `Timing: ${timing}`
   ];
@@ -898,7 +879,7 @@ function buildBookingCreatedEmail(data) {
   
   const jobTypeDisplay = jobType === 'JUNK_REMOVAL' 
     ? 'junk removal' 
-    : jobType === 'MOVE_SMALL' 
+    : jobType === 'MOVING' 
     ? 'small-medium moving' 
     : jobType.toLowerCase().replace(/_/g, ' ');
   
@@ -1466,7 +1447,6 @@ module.exports = {
   buildBookingInProgressDropoffEmail,
   buildBookingRescheduledEmail,
   normalizeJobType,
-  normalizePropertyType,
   formatTimingPreference,
   formatAddress,
   escapeHtml

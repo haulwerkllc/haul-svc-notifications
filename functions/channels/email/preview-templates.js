@@ -18,7 +18,6 @@ process.env.SUPPORT_EMAIL = 'support@haulwerk.com';
 // Sample job data for preview
 const sampleJobData = {
   job_type: 'JUNK_REMOVAL',
-  property_type: 'RESIDENTIAL',
   timing_preference: 'SCHEDULED',
   preferred_pickup_window_start: '2026-01-10T14:00:00Z',
   preferred_pickup_window_end: '2026-01-10T16:00:00Z',
@@ -33,8 +32,7 @@ const sampleJobData = {
 };
 
 const sampleJobDataFlexible = {
-  job_type: 'MOVE_SMALL',
-  property_type: 'APARTMENT',
+  job_type: 'MOVING',
   timing_preference: 'FLEXIBLE',
   service_address: '456 Oak Ave, Santa Monica, CA 90401',
   description: 'Small 1-bedroom apartment move within same building, 2nd floor to 3rd floor. Mostly boxes and small furniture.'

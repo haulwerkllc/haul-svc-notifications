@@ -278,7 +278,6 @@ async function constructJobPostedNotification(jobId) {
 
   // Extract job attributes
   const jobType = job.job_type || 'hauling';
-  const propertyType = job.property_type || 'property';
   const timingPreference = job.timing_preference || 'Not specified';
   
   // Build human-readable address
@@ -293,7 +292,6 @@ async function constructJobPostedNotification(jobId) {
   const bodyParts = [
     `A new ${jobType} job has been posted near you.`,
     '',
-    `Property type: ${propertyType}`,
     `Location: ${serviceAddress}`,
     `Timing: ${timingPreference}`
   ];
@@ -315,7 +313,6 @@ async function constructJobPostedNotification(jobId) {
     // Include raw data for deep linking or custom rendering
     data: {
       job_type: job.job_type,
-      property_type: job.property_type,
       service_location: job.service_location,
       service_address: job.service_address,
       timing_preference: job.timing_preference,
@@ -432,7 +429,7 @@ function formatCentsToUSD(cents) {
 function formatJobTypeForConsumer(jobType) {
   const map = {
     'JUNK_REMOVAL': 'junk hauling',
-    'MOVE_SMALL': 'small move'
+    'MOVING': 'small move'
   };
   return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
 }
@@ -754,7 +751,7 @@ async function constructJobCanceledNotification(jobId) {
 function formatJobTypeForServiceProvider(jobType) {
   const map = {
     'JUNK_REMOVAL': 'junk removal',
-    'MOVE_SMALL': 'small move'
+    'MOVING': 'small move'
   };
   return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
 }

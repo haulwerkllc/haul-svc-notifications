@@ -153,26 +153,15 @@ function formatEnvironment(env) {
 }
 
 /**
- * Normalize property type to init caps
- */
-function normalizePropertyType(propertyType) {
-  if (!propertyType) return 'Not specified';
-  return propertyType
-    .toLowerCase()
-    .split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
-/**
  * Normalize job type
  */
 function normalizeJobType(dataType) {
   if (!dataType) return 'Not specified';
   const typeMap = {
     'JUNK_REMOVAL': 'Junk Removal',
-    'MOVE_SMALL': 'Small Move',
-    'MOVE_STORAGE': 'Storage Move',
+    'MOVING': 'Moving',
+    'E_WASTE': 'E-Waste Recycling',
+    'MUNICIPAL_WASTER': 'Municipal Waste'
   };
   return typeMap[dataType] || dataType;
 }
@@ -187,7 +176,6 @@ function buildJobPostedSlackMessage(message) {
   // Extract enriched job data from notification_content.data
   const data = notification_content.data || {};
   
-  const propertyType = normalizePropertyType(data.property_type);
   const jobType = normalizeJobType(data.job_type);
   const address = formatAddress(data.service_address);
   const unit = data.unit ? `Unit ${data.unit}` : '';
@@ -230,13 +218,6 @@ function buildJobPostedSlackMessage(message) {
             elements: [
               { type: 'text', text: 'Address: ', style: { bold: true } },
               { type: 'text', text: addressWithUnit }
-            ]
-          },
-          {
-            type: 'rich_text_section',
-            elements: [
-              { type: 'text', text: 'Property Type: ', style: { bold: true } },
-              { type: 'text', text: propertyType }
             ]
           },
           {
