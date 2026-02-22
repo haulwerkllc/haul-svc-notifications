@@ -29,7 +29,7 @@ const ELIGIBLE_ROLES = ['OWNER', 'ADMIN', 'DISPATCHER'];
  * 
  * Implementation:
  * 1. Query Job table for job details
- * 2. Extract service_location (lat/lon)
+ * 2. Extract service_location (lat/lng)
  * 3. Query OpenSearch for service areas containing the location
  * 4. Extract company_ids from matching service areas
  * 5. Query CompanyRole table for OWNER/ADMIN/DISPATCHER users
@@ -64,7 +64,7 @@ class JobPostedResolver extends NotificationResolver {
 
       // Step 2: Extract service location
       const serviceLocation = job.service_location;
-      if (!serviceLocation || !serviceLocation.lat || !serviceLocation.lon) {
+      if (!serviceLocation || !serviceLocation.lat || !serviceLocation.lng) {
         console.warn('[JobPostedResolver] Job has no service_location', { job_id: jobId });
         return [];
       }
@@ -72,13 +72,13 @@ class JobPostedResolver extends NotificationResolver {
       console.log('[JobPostedResolver] Job service location', {
         job_id: jobId,
         lat: serviceLocation.lat,
-        lon: serviceLocation.lon
+        lng: serviceLocation.lng
       });
 
       // Step 3: Query OpenSearch for matching service areas
       const matchingServiceAreas = await this.findMatchingServiceAreas(
         serviceLocation.lat,
-        serviceLocation.lon
+        serviceLocation.lng
       );
 
       if (matchingServiceAreas.length === 0) {
@@ -144,7 +144,7 @@ class JobPostedResolver extends NotificationResolver {
    * Find service areas that contain the given location
    * Uses OpenSearch with radius-based geo-distance calculation
    */
-  async findMatchingServiceAreas(lat, lon) {
+  async findMatchingServiceAreas(lat, lng) {
     if (!OPENSEARCH_ENDPOINT) {
       console.warn('[JobPostedResolver] OpenSearch endpoint not configured');
       return [];
@@ -167,7 +167,7 @@ class JobPostedResolver extends NotificationResolver {
                   distance: '100km', // Maximum search radius
                   'center': {
                     lat: lat,
-                    lon: lon
+                    lng: lng
                   }
                 }
               }
@@ -190,9 +190,9 @@ class JobPostedResolver extends NotificationResolver {
 
         const distance = this.calculateDistance(
           lat,
-          lon,
+          lng,
           serviceArea.center.lat,
-          serviceArea.center.lon
+          serviceArea.center.lng
         );
 
         return distance <= serviceArea.radius_km;
@@ -205,14 +205,14 @@ class JobPostedResolver extends NotificationResolver {
    * Calculate distance between two points using Haversine formula
    * Returns distance in kilometers
    */
-  calculateDistance(lat1, lon1, lat2, lon2) {
+  calculateDistance(lat1, lng1, lat2, lng2) {
     const R = 6371; // Earth's radius in km
     const dLat = this.toRadians(lat2 - lat1);
-    const dLon = this.toRadians(lon2 - lon1);
+    const dLng = this.toRadians(lng2 - lng1);
 
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.toRadians(lat1)) * Math.cos(this.toRadians(lat2)) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
