@@ -327,6 +327,7 @@ async function constructJobPostedNotification(jobId) {
 /**
  * Format address object into human-readable string
  * Supports both legacy {street,city,state,zip} and new {line_1,line_2,city,state,postal_code,country} formats
+ * Includes display_name (e.g., business name) if present
  */
 function formatAddress(address) {
   if (typeof address === 'string') {
@@ -338,6 +339,11 @@ function formatAddress(address) {
   }
 
   const parts = [];
+  
+  // Display name (e.g., "CVS Pharmacy") - show if it exists and differs from line_1
+  if (address.display_name && address.display_name !== address.line_1) {
+    parts.push(address.display_name);
+  }
   
   // New format: line_1, line_2, city, state, postal_code, country
   if (address.line_1) {
@@ -510,7 +516,7 @@ async function constructBidCreatedNotification(bidId) {
   const jobTimezone = job?.service_location_timezone;
 
   // Format bid details
-  const bidAmount = formatCentsToUSD(bid.amount_usd_cents);
+  const bidAmount = formatCentsToUSD(bid.amount_cents);
   const companyName = company?.name || 'A service provider';
   const jobType = formatJobTypeForConsumer(bid.job_type);
   const pickupWindow = formatPickupWindow(
@@ -566,7 +572,7 @@ async function constructBidCreatedNotification(bidId) {
     },
     data: {
       bid_id: bidId,
-      bid_amount_usd_cents: bid.amount_usd_cents,
+      bid_amount_cents: bid.amount_cents,
       bid_amount_formatted: bidAmount,
       job_id: bid.job_id,
       job_type: bid.job_type,
@@ -612,7 +618,7 @@ async function constructBidUpdatedNotification(bidId) {
   const jobTimezone = job?.service_location_timezone;
 
   // Format bid details
-  const bidAmount = formatCentsToUSD(bid.amount_usd_cents);
+  const bidAmount = formatCentsToUSD(bid.amount_cents);
   const companyName = company?.name || 'A service provider';
   const jobType = formatJobTypeForConsumer(bid.job_type);
   const pickupWindow = formatPickupWindow(
@@ -668,7 +674,7 @@ async function constructBidUpdatedNotification(bidId) {
     },
     data: {
       bid_id: bidId,
-      bid_amount_usd_cents: bid.amount_usd_cents,
+      bid_amount_cents: bid.amount_cents,
       bid_amount_formatted: bidAmount,
       job_id: bid.job_id,
       job_type: bid.job_type,

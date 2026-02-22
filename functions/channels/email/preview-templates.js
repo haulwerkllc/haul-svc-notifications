@@ -22,6 +22,7 @@ const sampleJobData = {
   preferred_pickup_window_start: '2026-01-10T14:00:00Z',
   preferred_pickup_window_end: '2026-01-10T16:00:00Z',
   service_address: {
+    display_name: 'Office Depot',
     line_1: '123 Main St',
     city: 'Los Angeles',
     state: 'CA',

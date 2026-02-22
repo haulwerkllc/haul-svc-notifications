@@ -252,7 +252,7 @@ function buildBidCreatedSlackMessage(message) {
   
   // Try formatted first, fall back to formatting raw value
   const quotedAmount = data.bid_amount_formatted 
-    || (data.bid_amount_usd_cents || data.amount_usd_cents ? formatCurrency(data.bid_amount_usd_cents || data.amount_usd_cents) : 'Not specified');
+    || (data.bid_amount_cents || data.amount_cents ? formatCurrency(data.bid_amount_cents || data.amount_cents) : 'Not specified');
   const companyName = data.company_name || 'Unknown company';
   const jobType = normalizeJobType(data.job_type);
   const address = data.location_formatted || formatAddress(data.service_address);
@@ -344,7 +344,7 @@ function buildBookingCreatedSlackMessage(message) {
   
   // Try formatted first, fall back to formatting raw value
   const bookedAmount = data.booking_amount_formatted 
-    || (data.amount_usd_cents ? formatCurrency(data.amount_usd_cents) : 'Not specified');
+    || (data.amount_cents ? formatCurrency(data.amount_cents) : 'Not specified');
   const companyName = data.company_name || 'Unknown company';
   const jobType = normalizeJobType(data.job_type);
   const address = data.location_formatted || formatAddress(data.service_address);
@@ -415,12 +415,18 @@ function buildBookingCreatedSlackMessage(message) {
 /**
  * Format address object to readable string
  * Supports both legacy {street,city,state,zip} and new {line_1,line_2,city,state,postal_code,country} formats
+ * Includes display_name (e.g., business name) if present
  */
 function formatAddress(address) {
   if (!address) return 'Not specified';
   if (typeof address === 'string') return address;
 
   const parts = [];
+  
+  // Display name (e.g., "CVS Pharmacy") - show if it exists and differs from line_1
+  if (address.display_name && address.display_name !== address.line_1) {
+    parts.push(address.display_name);
+  }
   
   // New format: line_1, line_2, city, state, postal_code, country
   if (address.line_1) {

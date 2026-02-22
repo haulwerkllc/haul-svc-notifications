@@ -80,7 +80,7 @@ class BookingAssignedResolver extends NotificationResolver {
         company_name: company?.name || null,
         logo_key: company?.logo_key || null,
         logo_url: company?.logo_key ? `${MEDIA_BASE_URL}/${company.logo_key}` : null,
-        amount_usd_cents: booking.amount_usd_cents,
+        amount_cents: booking.amount_cents,
         service_address: job.service_address,
         street_address: job.street_address || null,
         unit: job.unit || null,

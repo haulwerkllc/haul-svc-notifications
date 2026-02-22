@@ -362,12 +362,18 @@ function formatBiddingDeadline(biddingClosesAt, timezone) {
 /**
  * Format address for display
  * Supports both legacy {street,city,state,zip} and new {line_1,line_2,city,state,postal_code,country} formats
+ * Includes display_name (e.g., business name) if present
  */
 function formatAddress(address) {
   if (typeof address === 'string') return address;
   if (!address) return 'Location not specified';
   
   const parts = [];
+  
+  // Display name (e.g., "CVS Pharmacy") - show if it exists and differs from line_1
+  if (address.display_name && address.display_name !== address.line_1) {
+    parts.push(address.display_name);
+  }
   
   // New format: line_1, line_2, city, state, postal_code, country
   if (address.line_1) {
@@ -866,7 +872,7 @@ function buildBookingCreatedEmail(data) {
   console.log('[buildBookingCreatedEmail] Received data:', JSON.stringify(data, null, 2));
   
   const bookingNumber = data.booking_number || 'N/A';
-  const amountCents = data.amount_usd_cents || 0;
+  const amountCents = data.amount_cents || 0;
   const amountDollars = (amountCents / 100).toFixed(2);
   const location = formatAddress(data.service_address);
   const unit = data.unit ? ` ${data.unit}` : '';
