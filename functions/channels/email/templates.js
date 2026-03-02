@@ -738,7 +738,10 @@ function buildJobClosedEmail(data) {
   const bidCount = data.bid_count || 0;
   const jobId = data.job_id;
   const scenario = data.scenario || (bidCount > 0 ? 'A' : 'B');
-  
+
+  if (scenario === 'INSTANT_BOOK_EXPIRED') {
+    return buildInstantBookExpiredEmail({ jobType, location, jobId });
+  }
   if (scenario === 'A') {
     return buildJobClosedWithQuotesEmail({ jobType, location, bidCount, jobId });
   } else {
@@ -853,6 +856,63 @@ function buildJobClosedNoQuotesEmail({ jobType, location, jobId }) {
     `Contact support: ${SUPPORT_EMAIL}`
   ];
   
+  return {
+    subject,
+    html: buildConsumerTemplate({
+      subject,
+      preheader,
+      bodyContent
+    }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Scenario C: Instant book — acceptance window elapsed, no provider accepted the price
+ */
+function buildInstantBookExpiredEmail({ jobType, location, jobId }) {
+  const subject = 'Your instant book price was not accepted';
+  const preheader = 'No providers accepted your instant book price';
+
+  const bodyContent = `
+    <h1>Your instant book price was not accepted</h1>
+    <p>Your instant book price for your ${escapeHtml(jobType)} job was not accepted by any service providers within the 48-hour window.</p>
+
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+    </div>
+
+    <p>This can happen when providers in your area are unavailable or the instant book price is below their current rates.</p>
+
+    <p>You can repost the job to receive competitive bids from local providers, or try again with a different instant book price.</p>
+
+    <div class="cta">
+      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View job</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Your instant book price was not accepted',
+    '',
+    `Your instant book price for your ${jobType} job was not accepted by any service providers within the 48-hour window.`,
+    '',
+    `Location: ${location}`,
+    '',
+    'This can happen when providers in your area are unavailable or the instant book price is below their current rates.',
+    '',
+    'You can repost the job to receive competitive bids from local providers, or try again with a different instant book price.',
+    '',
+    `View job: ${BASE_URL}/jobs/${jobId}`,
+    '',
+    '---',
+    'You received this because you posted a job on Haul.',
+    `Update preferences: ${BASE_URL}/user/preferences`,
+    `Contact support: ${SUPPORT_EMAIL}`
+  ];
+
   return {
     subject,
     html: buildConsumerTemplate({
@@ -1444,6 +1504,7 @@ module.exports = {
   buildJobPostedEmail,
   buildJobCanceledEmail,
   buildJobClosedEmail,
+  buildInstantBookExpiredEmail,
   buildBidCreatedEmail,
   buildBidUpdatedEmail,
   buildBookingCreatedEmail,

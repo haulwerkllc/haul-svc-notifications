@@ -781,30 +781,46 @@ async function constructJobClosedNotification(jobId) {
     };
   }
 
-  // Query open bids for this job
-  const openBids = await queryOpenBidsForJob(jobId);
-  const bidCount = openBids.length;
-
-  // Format job details
   const jobType = formatJobTypeForConsumer(job.job_type);
-  const serviceAddress = job.service_address 
+  const serviceAddress = job.service_address
     ? formatAddress(job.service_address)
     : 'Your job location';
 
-  // Determine scenario
-  const hasQuotes = bidCount > 0;
-  const scenario = hasQuotes ? 'A' : 'B';
+  // Instant book: acceptance window elapsed with no provider accepting the price
+  if (job.instant_book === true) {
+    return {
+      subject: 'Your instant book price was not accepted',
+      body: [
+        `Your instant book price for your ${jobType} job was not accepted by any service providers within the 48-hour window.`,
+        '',
+        `Location: ${serviceAddress}`,
+        '',
+        'You can repost the job to receive competitive bids, or try a different instant book price.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: {
+        job_id: jobId,
+        job_type: job.job_type,
+        job_type_formatted: jobType,
+        service_address: job.service_address,
+        location_formatted: serviceAddress,
+        scenario: 'INSTANT_BOOK_EXPIRED'
+      }
+    };
+  }
+
+  // Standard bids flow — Query open bids for this job
+  const openBids = await queryOpenBidsForJob(jobId);
+  const bidCount = openBids.length;
 
   console.log('[Orchestrator] Job closed scenario', {
     job_id: jobId,
     bid_count: bidCount,
-    scenario
+    scenario: bidCount > 0 ? 'A' : 'B',
   });
 
-  if (hasQuotes) {
-    // Scenario A: Quotes received
+  if (bidCount > 0) {
     const quoteText = bidCount === 1 ? '1 quote' : `${bidCount} quotes`;
-    
     return {
       subject: `You have ${quoteText} to review`,
       body: [
@@ -814,10 +830,7 @@ async function constructJobClosedNotification(jobId) {
         '',
         `Location: ${serviceAddress}`
       ].join('\n'),
-      entity: {
-        id: jobId,
-        type: 'job'
-      },
+      entity: { id: jobId, type: 'job' },
       data: {
         job_id: jobId,
         job_type: job.job_type,
@@ -829,7 +842,6 @@ async function constructJobClosedNotification(jobId) {
       }
     };
   } else {
-    // Scenario B: No quotes received
     return {
       subject: 'Your job did not receive any quotes',
       body: [
@@ -839,10 +851,7 @@ async function constructJobClosedNotification(jobId) {
         '',
         'This can happen when providers in your area are at capacity. You can repost your job to try again.'
       ].join('\n'),
-      entity: {
-        id: jobId,
-        type: 'job'
-      },
+      entity: { id: jobId, type: 'job' },
       data: {
         job_id: jobId,
         job_type: job.job_type,
