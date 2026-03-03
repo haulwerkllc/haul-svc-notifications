@@ -64,6 +64,10 @@ class BookingRescheduledResolver extends NotificationResolver {
       const company = await this.getCompany(booking.company_id);
 
       // Step 4: Enrich event context with all necessary data for email templates
+      // Derive address from job.stops[] PICKUP stop
+      const pickupStop = job.stops?.find(s => s.stop_type === 'PICKUP') || job.stops?.[0] || null;
+      const pickupTimezone = pickupStop?.timezone || null;
+
       event.context = {
         ...event.context,
         booking_id: bookingId,
@@ -74,10 +78,8 @@ class BookingRescheduledResolver extends NotificationResolver {
         company_name: company?.name || null,
         logo_key: company?.logo_key || null,
         logo_url: company?.logo_key ? `${MEDIA_BASE_URL}/${company.logo_key}` : null,
-        service_address: job.service_address,
-        street_address: job.street_address || null,
-        unit: job.unit || null,
-        service_location_timezone: job.service_location_timezone || null,
+        stops: job.stops,
+        pickup_timezone: pickupTimezone,
         pickup_window_start: event.context?.pickup_window_start || booking.pickup_window_start || null,
         pickup_window_end: event.context?.pickup_window_end || booking.pickup_window_end || null,
         previous_pickup_window_start: event.context?.previous_pickup_window_start || null,

@@ -70,6 +70,10 @@ class BookingAssignedResolver extends NotificationResolver {
       const driver = booking.driver_user_id ? await this.getUser(booking.driver_user_id) : null;
 
       // Step 5: Enrich event context with all necessary data for email templates
+      // Derive address from job.stops[] PICKUP stop
+      const pickupStop = job.stops?.find(s => s.stop_type === 'PICKUP') || job.stops?.[0] || null;
+      const pickupTimezone = pickupStop?.timezone || null;
+
       event.context = {
         ...event.context,
         booking_id: bookingId,
@@ -81,10 +85,8 @@ class BookingAssignedResolver extends NotificationResolver {
         logo_key: company?.logo_key || null,
         logo_url: company?.logo_key ? `${MEDIA_BASE_URL}/${company.logo_key}` : null,
         amount_cents: booking.amount_cents,
-        service_address: job.service_address,
-        street_address: job.street_address || null,
-        unit: job.unit || null,
-        service_location_timezone: job.service_location_timezone || null,
+        stops: job.stops,
+        pickup_timezone: pickupTimezone,
         pickup_window_start: booking.pickup_window_start || null,
         pickup_window_end: booking.pickup_window_end || null,
         driver_user_id: booking.driver_user_id,

@@ -29,7 +29,7 @@ const ELIGIBLE_ROLES = ['OWNER', 'ADMIN', 'DISPATCHER'];
  * 
  * Implementation:
  * 1. Query Job table for job details
- * 2. Extract service_location (lat/lng)
+ * 2. Extract PICKUP stop lat/lon from stops[]
  * 3. Query OpenSearch for service areas containing the location
  * 4. Extract company_ids from matching service areas
  * 5. Query CompanyRole table for OWNER/ADMIN/DISPATCHER users
@@ -62,29 +62,29 @@ class JobPostedResolver extends NotificationResolver {
         return [];
       }
 
-      // Step 2: Extract service location
-      const serviceLocation = job.service_location;
-      if (!serviceLocation || !serviceLocation.lat || !serviceLocation.lng) {
-        console.warn('[JobPostedResolver] Job has no service_location', { job_id: jobId });
+      // Step 2: Extract location from PICKUP stop
+      const pickupStop = job.stops?.find(s => s.stop_type === 'PICKUP') || job.stops?.[0];
+      if (!pickupStop || !pickupStop.lat || !pickupStop.lon) {
+        console.warn('[JobPostedResolver] Job has no PICKUP stop with lat/lon', { job_id: jobId });
         return [];
       }
 
-      console.log('[JobPostedResolver] Job service location', {
+      console.log('[JobPostedResolver] Job pickup location', {
         job_id: jobId,
-        lat: serviceLocation.lat,
-        lng: serviceLocation.lng
+        lat: pickupStop.lat,
+        lon: pickupStop.lon
       });
 
       // Step 3: Query OpenSearch for matching service areas
       const matchingServiceAreas = await this.findMatchingServiceAreas(
-        serviceLocation.lat,
-        serviceLocation.lng
+        pickupStop.lat,
+        pickupStop.lon
       );
 
       if (matchingServiceAreas.length === 0) {
         console.info('[JobPostedResolver] No service areas match job location', {
           job_id: jobId,
-          location: serviceLocation
+          location: { lat: pickupStop.lat, lon: pickupStop.lon }
         });
         return [];
       }
@@ -144,7 +144,7 @@ class JobPostedResolver extends NotificationResolver {
    * Find service areas that contain the given location
    * Uses OpenSearch with radius-based geo-distance calculation
    */
-  async findMatchingServiceAreas(lat, lng) {
+  async findMatchingServiceAreas(lat, lon) {
     if (!OPENSEARCH_ENDPOINT) {
       console.warn('[JobPostedResolver] OpenSearch endpoint not configured');
       return [];
@@ -167,7 +167,7 @@ class JobPostedResolver extends NotificationResolver {
                   distance: '100km', // Maximum search radius
                   'center': {
                     lat: lat,
-                    lng: lng
+                    lon: lon
                   }
                 }
               }
@@ -190,9 +190,9 @@ class JobPostedResolver extends NotificationResolver {
 
         const distance = this.calculateDistance(
           lat,
-          lng,
+          lon,
           serviceArea.center.lat,
-          serviceArea.center.lng
+          serviceArea.center.lon
         );
 
         return distance <= serviceArea.radius_km;

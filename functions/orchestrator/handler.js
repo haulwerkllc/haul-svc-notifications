@@ -280,10 +280,12 @@ async function constructJobPostedNotification(jobId) {
   const jobType = job.job_type || 'hauling';
   const timingPreference = job.timing_preference || 'Not specified';
   
-  // Build human-readable address
-  const serviceAddress = job.service_address 
-    ? formatAddress(job.service_address)
+  // Build human-readable address from PICKUP stop
+  const pickupStop = getPickupStop(job);
+  const pickupAddress = pickupStop
+    ? formatStopAddress(pickupStop)
     : 'Location not specified';
+  const pickupTimezone = pickupStop?.timezone || null;
 
   // Build subject line
   const subject = 'New job available in your service area';
@@ -292,7 +294,7 @@ async function constructJobPostedNotification(jobId) {
   const bodyParts = [
     `A new ${jobType} job has been posted near you.`,
     '',
-    `Location: ${serviceAddress}`,
+    `Location: ${pickupAddress}`,
     `Timing: ${timingPreference}`
   ];
 
@@ -313,56 +315,80 @@ async function constructJobPostedNotification(jobId) {
     // Include raw data for deep linking or custom rendering
     data: {
       job_type: job.job_type,
-      service_location: job.service_location,
-      service_address: job.service_address,
+      stops: job.stops,
       timing_preference: job.timing_preference,
       preferred_pickup_window_start: job.preferred_pickup_window_start,
       preferred_pickup_window_end: job.preferred_pickup_window_end,
       bidding_closes_at: job.bidding_closes_at,
-      service_location_timezone: job.service_location_timezone
+      pickup_timezone: pickupTimezone
     }
   };
 }
 
 /**
- * Format address object into human-readable string
- * Supports both legacy {street,city,state,zip} and new {line_1,line_2,city,state,postal_code,country} formats
- * Includes display_name (e.g., business name) if present
+ * Get the PICKUP stop from a job.
+ * Returns the first stop with stop_type === 'PICKUP', or the first stop.
+ *
+ * @param {object} job - Job object with stops[]
+ * @returns {object|null} PICKUP stop or null
  */
-function formatAddress(address) {
-  if (typeof address === 'string') {
-    return address;
-  }
+function getPickupStop(job) {
+  if (!job?.stops || !Array.isArray(job.stops) || job.stops.length === 0) return null;
+  return job.stops.find(s => s.stop_type === 'PICKUP') || job.stops[0];
+}
 
-  if (!address) {
-    return 'Location not specified';
-  }
+/**
+ * Get the DROPOFF stop from a job.
+ *
+ * @param {object} job - Job object with stops[]
+ * @returns {object|null} DROPOFF stop or null
+ */
+function getDropoffStop(job) {
+  if (!job?.stops || !Array.isArray(job.stops)) return null;
+  return job.stops.find(s => s.stop_type === 'DROPOFF') || null;
+}
+
+/**
+ * Get pickup timezone from a job's PICKUP stop.
+ *
+ * @param {object} job - Job object with stops[]
+ * @returns {string|null} Timezone string or null
+ */
+function getPickupTimezone(job) {
+  const pickup = getPickupStop(job);
+  return pickup?.timezone || null;
+}
+
+/**
+ * Format a stop object into a human-readable address string.
+ * If !display_name, renders line_1 as display_name.
+ * Includes display_name (e.g., business name) if present and differs from line_1.
+ *
+ * @param {object} stop - Stop object with address fields
+ * @returns {string} Formatted address string
+ */
+function formatStopAddress(stop) {
+  if (!stop) return 'Location not specified';
+  if (typeof stop === 'string') return stop;
 
   const parts = [];
-  
-  // Display name (e.g., "CVS Pharmacy") - show if it exists and differs from line_1
-  if (address.display_name && address.display_name !== address.line_1) {
-    parts.push(address.display_name);
+
+  // Determine display_name: use stop.display_name, or fallback to line_1
+  const displayName = stop.display_name || stop.line_1;
+
+  // Show display_name if it exists and differs from line_1
+  if (displayName && displayName !== stop.line_1) {
+    parts.push(displayName);
   }
-  
-  // New format: line_1, line_2, city, state, postal_code, country
-  if (address.line_1) {
-    parts.push(address.line_1);
-    if (address.line_2) parts.push(address.line_2);
-  } else if (address.street) {
-    // Legacy format: street, city, state, zip
-    parts.push(address.street);
+
+  if (stop.line_1) {
+    parts.push(stop.line_1);
+    if (stop.line_2) parts.push(stop.line_2);
   }
-  
-  if (address.city) parts.push(address.city);
-  if (address.state) parts.push(address.state);
-  
-  // Postal code (new format) or zip (legacy format)
-  if (address.postal_code) {
-    parts.push(address.postal_code);
-  } else if (address.zip) {
-    parts.push(address.zip);
-  }
+
+  if (stop.city) parts.push(stop.city);
+  if (stop.state) parts.push(stop.state);
+  if (stop.postal_code) parts.push(stop.postal_code);
 
   return parts.length > 0 ? parts.join(', ') : 'Location not specified';
 }
@@ -512,8 +538,9 @@ async function constructBidCreatedNotification(bidId) {
   // Load company data
   const company = bid.company_id ? await loadCompanyData(bid.company_id) : null;
 
-  // Get job timezone for proper time formatting
-  const jobTimezone = job?.service_location_timezone;
+  // Get job timezone from PICKUP stop
+  const jobTimezone = getPickupTimezone(job);
+  const pickupStop = getPickupStop(job);
 
   // Format bid details
   const bidAmount = formatCentsToUSD(bid.amount_cents);
@@ -525,14 +552,10 @@ async function constructBidCreatedNotification(bidId) {
     jobTimezone
   );
   
-  // Build address with unit
-  let locationText = 'Your job location';
-  if (job?.service_address) {
-    locationText = formatAddress(job.service_address);
-    if (job.unit) {
-      locationText += `, Unit ${job.unit}`;
-    }
-  }
+  // Build address from PICKUP stop
+  const locationText = pickupStop
+    ? formatStopAddress(pickupStop)
+    : 'Your job location';
 
   // Build subject line
   const subject = 'You received a new bid on your job';
@@ -581,13 +604,14 @@ async function constructBidCreatedNotification(bidId) {
       company_name: companyName,
       company_logo_url: companyLogoUrl,
       company_icon_url: companyIconUrl,
-      service_address: job?.service_address,
-      unit: job?.unit,
+      stops: job?.stops,
       location_formatted: locationText,
       proposed_pickup_window_start: bid.proposed_pickup_window_start,
       proposed_pickup_window_end: bid.proposed_pickup_window_end,
       pickup_window_formatted: pickupWindow,
-      bidding_closes_at: job?.bidding_closes_at,      service_location_timezone: jobTimezone,      notes: bid.notes
+      bidding_closes_at: job?.bidding_closes_at,
+      pickup_timezone: jobTimezone,
+      notes: bid.notes
     }
   };
 }
@@ -614,8 +638,9 @@ async function constructBidUpdatedNotification(bidId) {
   // Load company data
   const company = bid.company_id ? await loadCompanyData(bid.company_id) : null;
 
-  // Get job timezone for proper time formatting
-  const jobTimezone = job?.service_location_timezone;
+  // Get job timezone from PICKUP stop
+  const jobTimezone = getPickupTimezone(job);
+  const pickupStop = getPickupStop(job);
 
   // Format bid details
   const bidAmount = formatCentsToUSD(bid.amount_cents);
@@ -627,14 +652,10 @@ async function constructBidUpdatedNotification(bidId) {
     jobTimezone
   );
   
-  // Build address with unit
-  let locationText = 'Your job location';
-  if (job?.service_address) {
-    locationText = formatAddress(job.service_address);
-    if (job.unit) {
-      locationText += `, Unit ${job.unit}`;
-    }
-  }
+  // Build address from PICKUP stop
+  const locationText = pickupStop
+    ? formatStopAddress(pickupStop)
+    : 'Your job location';
 
   // Build subject line
   const subject = 'A bid on your job was updated';
@@ -683,14 +704,13 @@ async function constructBidUpdatedNotification(bidId) {
       company_name: companyName,
       company_logo_url: companyLogoUrl,
       company_icon_url: companyIconUrl,
-      service_address: job?.service_address,
-      unit: job?.unit,
+      stops: job?.stops,
       location_formatted: locationText,
       proposed_pickup_window_start: bid.proposed_pickup_window_start,
       proposed_pickup_window_end: bid.proposed_pickup_window_end,
       pickup_window_formatted: pickupWindow,
       bidding_closes_at: job?.bidding_closes_at,
-      service_location_timezone: jobTimezone,
+      pickup_timezone: jobTimezone,
       notes: bid.notes
     }
   };
@@ -713,8 +733,9 @@ async function constructJobCanceledNotification(jobId) {
 
   // Format job details
   const jobType = formatJobTypeForServiceProvider(job.job_type);
-  const serviceAddress = job.service_address 
-    ? formatAddress(job.service_address)
+  const pickupStop = getPickupStop(job);
+  const pickupAddress = pickupStop
+    ? formatStopAddress(pickupStop)
     : 'Location not specified';
 
   const subject = 'A job you bid on was canceled';
@@ -722,7 +743,7 @@ async function constructJobCanceledNotification(jobId) {
   const bodyParts = [
     `The ${jobType} job you submitted a bid on has been canceled by the customer.`,
     '',
-    `Location: ${serviceAddress}`
+    `Location: ${pickupAddress}`
   ];
 
   if (job.description) {
@@ -744,8 +765,8 @@ async function constructJobCanceledNotification(jobId) {
       job_id: jobId,
       job_type: job.job_type,
       job_type_formatted: jobType,
-      service_address: job.service_address,
-      location_formatted: serviceAddress,
+      stops: job.stops,
+      location_formatted: pickupAddress,
       description: job.description
     }
   };
@@ -782,8 +803,9 @@ async function constructJobClosedNotification(jobId) {
   }
 
   const jobType = formatJobTypeForConsumer(job.job_type);
-  const serviceAddress = job.service_address
-    ? formatAddress(job.service_address)
+  const pickupStop = getPickupStop(job);
+  const pickupAddress = pickupStop
+    ? formatStopAddress(pickupStop)
     : 'Your job location';
 
   // Instant book: acceptance window elapsed with no provider accepting the price
@@ -793,7 +815,7 @@ async function constructJobClosedNotification(jobId) {
       body: [
         `Your instant book price for your ${jobType} job was not accepted by any service providers within the 48-hour window.`,
         '',
-        `Location: ${serviceAddress}`,
+        `Location: ${pickupAddress}`,
         '',
         'You can repost the job to receive competitive bids, or try a different instant book price.'
       ].join('\n'),
@@ -802,8 +824,8 @@ async function constructJobClosedNotification(jobId) {
         job_id: jobId,
         job_type: job.job_type,
         job_type_formatted: jobType,
-        service_address: job.service_address,
-        location_formatted: serviceAddress,
+        stops: job.stops,
+        location_formatted: pickupAddress,
         scenario: 'INSTANT_BOOK_EXPIRED'
       }
     };
@@ -828,15 +850,15 @@ async function constructJobClosedNotification(jobId) {
         '',
         `You received ${quoteText}. Review and select a quote to book your service.`,
         '',
-        `Location: ${serviceAddress}`
+        `Location: ${pickupAddress}`
       ].join('\n'),
       entity: { id: jobId, type: 'job' },
       data: {
         job_id: jobId,
         job_type: job.job_type,
         job_type_formatted: jobType,
-        service_address: job.service_address,
-        location_formatted: serviceAddress,
+        stops: job.stops,
+        location_formatted: pickupAddress,
         bid_count: bidCount,
         scenario: 'A'
       }
@@ -847,7 +869,7 @@ async function constructJobClosedNotification(jobId) {
       body: [
         `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
         '',
-        `Location: ${serviceAddress}`,
+        `Location: ${pickupAddress}`,
         '',
         'This can happen when providers in your area are at capacity. You can repost your job to try again.'
       ].join('\n'),
@@ -856,8 +878,8 @@ async function constructJobClosedNotification(jobId) {
         job_id: jobId,
         job_type: job.job_type,
         job_type_formatted: jobType,
-        service_address: job.service_address,
-        location_formatted: serviceAddress,
+        stops: job.stops,
+        location_formatted: pickupAddress,
         bid_count: 0,
         scenario: 'B'
       }

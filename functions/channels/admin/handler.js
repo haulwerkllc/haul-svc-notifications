@@ -177,21 +177,21 @@ function buildJobPostedSlackMessage(message) {
   const data = notification_content.data || {};
   
   const jobType = normalizeJobType(data.job_type);
-  const address = formatAddress(data.service_address);
-  const unit = data.unit ? `Unit ${data.unit}` : '';
-  const addressWithUnit = unit ? `${address}, ${unit}` : address;
+  const pickupStop = getPickupStop(data.stops);
+  const address = formatStopAddress(pickupStop);
+  const pickupTimezone = pickupStop?.timezone || null;
 
   // Format timing
   const timing = formatTimingPreference(
     data.timing_preference,
     data.preferred_pickup_window_start,
     data.preferred_pickup_window_end,
-    data.service_location_timezone
+    pickupTimezone
   );
 
   // Format bidding closes at
   const biddingClosesAt = data.bidding_closes_at
-    ? formatDateTime(data.bidding_closes_at, data.service_location_timezone)
+    ? formatDateTime(data.bidding_closes_at, pickupTimezone)
     : 'Not specified';
 
   return {
@@ -217,7 +217,7 @@ function buildJobPostedSlackMessage(message) {
             type: 'rich_text_section',
             elements: [
               { type: 'text', text: 'Address: ', style: { bold: true } },
-              { type: 'text', text: addressWithUnit }
+              { type: 'text', text: address }
             ]
           },
           {
@@ -255,20 +255,20 @@ function buildBidCreatedSlackMessage(message) {
     || (data.bid_amount_cents || data.amount_cents ? formatCurrency(data.bid_amount_cents || data.amount_cents) : 'Not specified');
   const companyName = data.company_name || 'Unknown company';
   const jobType = normalizeJobType(data.job_type);
-  const address = data.location_formatted || formatAddress(data.service_address);
-  const unit = data.unit ? `Unit ${data.unit}` : '';
-  const addressWithUnit = unit ? `${address}, ${unit}` : address;
+  const pickupStop = data.location_formatted ? null : getPickupStop(data.stops);
+  const address = data.location_formatted || formatStopAddress(pickupStop);
 
   // Use pre-formatted service window from orchestrator if available
+  const pickupTimezone = pickupStop?.timezone || data.pickup_timezone || null;
   const serviceWindow = data.pickup_window_formatted || formatTimeWindow(
     data.proposed_pickup_window_start,
     data.proposed_pickup_window_end,
-    data.service_location_timezone
+    pickupTimezone
   );
 
   // Format bidding closes at
   const biddingClosesAt = data.bidding_closes_at
-    ? formatDateTime(data.bidding_closes_at, data.service_location_timezone)
+    ? formatDateTime(data.bidding_closes_at, pickupTimezone)
     : 'Not specified';
 
   return {
@@ -309,7 +309,7 @@ function buildBidCreatedSlackMessage(message) {
             type: 'rich_text_section',
             elements: [
               { type: 'text', text: 'Address: ', style: { bold: true } },
-              { type: 'text', text: addressWithUnit }
+              { type: 'text', text: address }
             ]
           },
           {
@@ -347,15 +347,15 @@ function buildBookingCreatedSlackMessage(message) {
     || (data.amount_cents ? formatCurrency(data.amount_cents) : 'Not specified');
   const companyName = data.company_name || 'Unknown company';
   const jobType = normalizeJobType(data.job_type);
-  const address = data.location_formatted || formatAddress(data.service_address);
-  const unit = data.unit ? `Unit ${data.unit}` : '';
-  const addressWithUnit = unit ? `${address}, ${unit}` : address;
+  const bookingPickupStop = data.location_formatted ? null : getPickupStop(data.stops);
+  const bookingAddress = data.location_formatted || formatStopAddress(bookingPickupStop);
 
   // Use pre-formatted service window from orchestrator if available
+  const bookingPickupTimezone = bookingPickupStop?.timezone || data.pickup_timezone || null;
   const serviceWindow = data.pickup_window_formatted || formatTimeWindow(
     data.pickup_window_start,
     data.pickup_window_end,
-    data.service_location_timezone
+    bookingPickupTimezone
   );
 
   return {
@@ -396,7 +396,7 @@ function buildBookingCreatedSlackMessage(message) {
             type: 'rich_text_section',
             elements: [
               { type: 'text', text: 'Address: ', style: { bold: true } },
-              { type: 'text', text: addressWithUnit }
+              { type: 'text', text: bookingAddress }
             ]
           },
           {
@@ -413,41 +413,42 @@ function buildBookingCreatedSlackMessage(message) {
 }
 
 /**
- * Format address object to readable string
- * Supports both legacy {street,city,state,zip} and new {line_1,line_2,city,state,postal_code,country} formats
- * Includes display_name (e.g., business name) if present
+ * Format a stop object into a readable address string.
+ * If !display_name, renders line_1 as display_name.
+ * Includes display_name (e.g., business name) if present and differs from line_1.
  */
-function formatAddress(address) {
-  if (!address) return 'Not specified';
-  if (typeof address === 'string') return address;
+function formatStopAddress(stop) {
+  if (!stop) return 'Not specified';
+  if (typeof stop === 'string') return stop;
 
   const parts = [];
-  
-  // Display name (e.g., "CVS Pharmacy") - show if it exists and differs from line_1
-  if (address.display_name && address.display_name !== address.line_1) {
-    parts.push(address.display_name);
-  }
-  
-  // New format: line_1, line_2, city, state, postal_code, country
-  if (address.line_1) {
-    parts.push(address.line_1);
-    if (address.line_2) parts.push(address.line_2);
-  } else if (address.street) {
-    // Legacy format: street, city, state, zip
-    parts.push(address.street);
-  }
-  
-  if (address.city) parts.push(address.city);
-  if (address.state) parts.push(address.state);
-  
-  // Postal code (new format) or zip (legacy format)
-  if (address.postal_code) {
-    parts.push(address.postal_code);
-  } else if (address.zip) {
-    parts.push(address.zip);
+
+  // Determine display_name: use stop.display_name, or fallback to line_1
+  const displayName = stop.display_name || stop.line_1;
+
+  // Show display_name if it exists and differs from line_1
+  if (displayName && displayName !== stop.line_1) {
+    parts.push(displayName);
   }
 
+  if (stop.line_1) {
+    parts.push(stop.line_1);
+    if (stop.line_2) parts.push(stop.line_2);
+  }
+
+  if (stop.city) parts.push(stop.city);
+  if (stop.state) parts.push(stop.state);
+  if (stop.postal_code) parts.push(stop.postal_code);
+
   return parts.length > 0 ? parts.join(', ') : 'Not specified';
+}
+
+/**
+ * Get the PICKUP stop from stops array.
+ */
+function getPickupStop(stops) {
+  if (!stops || !Array.isArray(stops) || stops.length === 0) return null;
+  return stops.find(s => s.stop_type === 'PICKUP') || stops[0];
 }
 
 /**

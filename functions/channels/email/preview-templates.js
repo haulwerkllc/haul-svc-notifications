@@ -21,21 +21,53 @@ const sampleJobData = {
   timing_preference: 'SCHEDULED',
   preferred_pickup_window_start: '2026-01-10T14:00:00Z',
   preferred_pickup_window_end: '2026-01-10T16:00:00Z',
-  service_address: {
-    display_name: 'Office Depot',
-    line_1: '123 Main St',
-    city: 'Los Angeles',
-    state: 'CA',
-    postal_code: '90012',
-    country: 'USA'
-  },
+  stops: [
+    {
+      stop_type: 'PICKUP',
+      order: 0,
+      display_name: 'Office Depot',
+      line_1: '123 Main St',
+      city: 'Los Angeles',
+      state: 'CA',
+      postal_code: '90012',
+      country: 'USA',
+      lat: 34.0522,
+      lon: -118.2437,
+      timezone: 'America/Los_Angeles'
+    }
+  ],
   description: 'Need to remove old furniture from garage. Includes 2 couches, 1 coffee table, and misc boxes. Must be able to navigate narrow driveway.'
 };
 
 const sampleJobDataFlexible = {
   job_type: 'MOVING',
   timing_preference: 'FLEXIBLE',
-  service_address: '456 Oak Ave, Santa Monica, CA 90401',
+  stops: [
+    {
+      stop_type: 'PICKUP',
+      order: 0,
+      line_1: '456 Oak Ave',
+      city: 'Santa Monica',
+      state: 'CA',
+      postal_code: '90401',
+      country: 'US',
+      lat: 34.0195,
+      lon: -118.4912,
+      timezone: 'America/Los_Angeles'
+    },
+    {
+      stop_type: 'DROPOFF',
+      order: 1,
+      line_1: '789 Elm St',
+      city: 'Santa Monica',
+      state: 'CA',
+      postal_code: '90401',
+      country: 'US',
+      lat: 34.0201,
+      lon: -118.4950,
+      timezone: 'America/Los_Angeles'
+    }
+  ],
   description: 'Small 1-bedroom apartment move within same building, 2nd floor to 3rd floor. Mostly boxes and small furniture.'
 };
 

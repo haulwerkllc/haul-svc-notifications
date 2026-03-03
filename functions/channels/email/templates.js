@@ -360,39 +360,49 @@ function formatBiddingDeadline(biddingClosesAt, timezone) {
 }
 
 /**
- * Format address for display
- * Supports both legacy {street,city,state,zip} and new {line_1,line_2,city,state,postal_code,country} formats
- * Includes display_name (e.g., business name) if present
+ * Get the PICKUP stop from a stops array.
+ * Returns the first stop with stop_type === 'PICKUP', or the first stop.
  */
-function formatAddress(address) {
-  if (typeof address === 'string') return address;
-  if (!address) return 'Location not specified';
+function getPickupStop(stops) {
+  if (!stops || !Array.isArray(stops) || stops.length === 0) return null;
+  return stops.find(s => s.stop_type === 'PICKUP') || stops[0];
+}
+
+/**
+ * Get the DROPOFF stop from a stops array.
+ */
+function getDropoffStop(stops) {
+  if (!stops || !Array.isArray(stops)) return null;
+  return stops.find(s => s.stop_type === 'DROPOFF') || null;
+}
+
+/**
+ * Format a stop object into a display string.
+ * If !display_name, renders line_1 as display_name.
+ * Includes display_name (e.g., business name) if present and differs from line_1.
+ */
+function formatAddress(stop) {
+  if (typeof stop === 'string') return stop;
+  if (!stop) return 'Location not specified';
   
   const parts = [];
   
-  // Display name (e.g., "CVS Pharmacy") - show if it exists and differs from line_1
-  if (address.display_name && address.display_name !== address.line_1) {
-    parts.push(address.display_name);
+  // Determine display_name: use stop.display_name, or fallback to line_1
+  const displayName = stop.display_name || stop.line_1;
+  
+  // Show display_name if it exists and differs from line_1
+  if (displayName && displayName !== stop.line_1) {
+    parts.push(displayName);
   }
   
-  // New format: line_1, line_2, city, state, postal_code, country
-  if (address.line_1) {
-    parts.push(address.line_1);
-    if (address.line_2) parts.push(address.line_2);
-  } else if (address.street) {
-    // Legacy format: street, city, state, zip
-    parts.push(address.street);
+  if (stop.line_1) {
+    parts.push(stop.line_1);
+    if (stop.line_2) parts.push(stop.line_2);
   }
   
-  if (address.city) parts.push(address.city);
-  if (address.state) parts.push(address.state);
-  
-  // Postal code (new format) or zip (legacy format)
-  if (address.postal_code) {
-    parts.push(address.postal_code);
-  } else if (address.zip) {
-    parts.push(address.zip);
-  }
+  if (stop.city) parts.push(stop.city);
+  if (stop.state) parts.push(stop.state);
+  if (stop.postal_code) parts.push(stop.postal_code);
   
   return parts.length > 0 ? parts.join(', ') : 'Location not specified';
 }
@@ -407,8 +417,9 @@ function buildJobPostedEmail(jobData) {
     jobData.preferred_pickup_window_start,
     jobData.preferred_pickup_window_end
   );
-  const location = formatAddress(jobData.service_address);
-  const timezone = jobData.service_location_timezone;
+  const pickupStop = getPickupStop(jobData.stops);
+  const location = formatAddress(pickupStop);
+  const timezone = pickupStop?.timezone || jobData.pickup_timezone;
   const biddingClosesAt = jobData.bidding_closes_at ? formatBiddingDeadline(jobData.bidding_closes_at, timezone) : null;
   
   const subject = `New ${jobType} job available`;
@@ -430,7 +441,7 @@ function buildJobPostedEmail(jobData) {
     
     ${jobData.description ? `<p>${escapeHtml(jobData.description.substring(0, 200))}${jobData.description.length > 200 ? '...' : ''}</p>` : ''}
     
-    ${biddingClosesAt ? `<p>This job is open for bids until ${escapeHtml(biddingClosesAt)}.</p>` : ''}
+    ${biddingClosesAt ? `<p>This job is open for quotes until ${escapeHtml(biddingClosesAt)}.</p>` : ''}
     
     <div class="cta">
       <a href="${DISPATCHER_BASE_URL}/dashboard/jobs" class="cta-button">Place your bid</a>
@@ -488,7 +499,8 @@ function buildBidCreatedEmail(data) {
   const notes = data.notes;
   const companyLogoUrl = data.company_logo_url;
   const bidId = data.bid_id;
-  const timezone = data.service_location_timezone;
+  const pickupStop = getPickupStop(data.stops);
+  const timezone = pickupStop?.timezone || data.pickup_timezone;
   const biddingClosesAt = data.bidding_closes_at ? formatBiddingDeadline(data.bidding_closes_at, timezone) : 'the deadline';
   
   const subject = 'You received a new quote on your job';
@@ -583,7 +595,8 @@ function buildBidUpdatedEmail(data) {
   const notes = data.notes;
   const companyLogoUrl = data.company_logo_url;
   const bidId = data.bid_id;
-  const timezone = data.service_location_timezone;
+  const pickupStop = getPickupStop(data.stops);
+  const timezone = pickupStop?.timezone || data.pickup_timezone;
   const biddingClosesAt = data.bidding_closes_at ? formatBiddingDeadline(data.bidding_closes_at, timezone) : 'the deadline';
   
   const subject = 'A quote on your job was updated';
@@ -934,8 +947,8 @@ function buildBookingCreatedEmail(data) {
   const bookingNumber = data.booking_number || 'N/A';
   const amountCents = data.amount_cents || 0;
   const amountDollars = (amountCents / 100).toFixed(2);
-  const location = formatAddress(data.service_address);
-  const unit = data.unit ? ` ${data.unit}` : '';
+  const pickupStop = getPickupStop(data.stops);
+  const location = formatAddress(pickupStop);
   const companyName = data.company_name || 'your company';
   const logoUrl = data.logo_url;
   
@@ -973,7 +986,7 @@ function buildBookingCreatedEmail(data) {
       </div>
       <div class=\"detail-row\">
         <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+        <span class=\"detail-value\">${escapeHtml(location)}</span>
       </div>
     </div>
     
@@ -1023,12 +1036,12 @@ function buildBookingAssignedCustomerEmail(data) {
   console.log('[buildBookingAssignedCustomerEmail] Received data:', JSON.stringify(data, null, 2));
   
   const bookingNumber = data.booking_number || 'N/A';
-  const location = formatAddress(data.service_address);
-  const unit = data.unit ? `, ${data.unit}` : '';
+  const pickupStop = getPickupStop(data.stops);
+  const location = formatAddress(pickupStop);
   const companyName = data.company_name || 'the service provider';
   const driverName = data.driver_given_name || 'your crew leader';
   const logoUrl = data.logo_url;
-  const timezone = data.service_location_timezone;
+  const timezone = pickupStop?.timezone || data.pickup_timezone;
   
   // Format pickup window
   const pickupWindow = formatTimingPreference(
@@ -1062,7 +1075,7 @@ function buildBookingAssignedCustomerEmail(data) {
       </div>
       <div class=\"detail-row\">
         <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+        <span class=\"detail-value\">${escapeHtml(location)}</span>
       </div>
       <div class=\"detail-row\">
         <span class=\"detail-label\">Pickup window</span>
@@ -1085,7 +1098,7 @@ function buildBookingAssignedCustomerEmail(data) {
     `Crew leader: ${driverName}`,
     `Company: ${companyName}`,
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}${unit}`,
+    `Location: ${location}`,
     `Pickup window: ${pickupWindow}`,
     '',
     'Your crew has been assigned and will contact you to coordinate service.',
@@ -1115,11 +1128,11 @@ function buildBookingAssignedDriverEmail(data) {
   console.log('[buildBookingAssignedDriverEmail] Received data:', JSON.stringify(data, null, 2));
   
   const bookingNumber = data.booking_number || 'N/A';
-  const location = formatAddress(data.service_address);
-  const unit = data.unit ? `, ${data.unit}` : '';
+  const driverPickupStop = getPickupStop(data.stops);
+  const location = formatAddress(driverPickupStop);
   const companyName = data.company_name || 'your company';
   const logoUrl = data.logo_url;
-  const timezone = data.service_location_timezone;
+  const timezone = driverPickupStop?.timezone || data.pickup_timezone;
   
   // Format pickup window
   const pickupWindow = formatTimingPreference(
@@ -1147,7 +1160,7 @@ function buildBookingAssignedDriverEmail(data) {
       </div>
       <div class=\"detail-row\">
         <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+        <span class=\"detail-value\">${escapeHtml(location)}</span>
       </div>
       <div class=\"detail-row\">
         <span class=\"detail-label\">Pickup window</span>
@@ -1168,7 +1181,7 @@ function buildBookingAssignedDriverEmail(data) {
     "You've been assigned to handle this booking.",
     '',
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}${unit}`,
+    `Location: ${location}`,
     `Pickup window: ${pickupWindow}`,
     '',
     'Review the job details and coordinate with the customer to complete the service.',
@@ -1198,12 +1211,12 @@ function buildBookingInProgressEmail(data) {
   console.log('[buildBookingInProgressEmail] Received data:', JSON.stringify(data, null, 2));
   
   const bookingNumber = data.booking_number || 'N/A';
-  const location = formatAddress(data.service_address);
-  const unit = data.unit ? `, ${data.unit}` : '';
+  const progressPickupStop = getPickupStop(data.stops);
+  const location = formatAddress(progressPickupStop);
   const companyName = data.company_name || 'your service provider';
   const driverName = data.driver_given_name || 'Your crew';
   const logoUrl = data.logo_url;
-  const timezone = data.service_location_timezone;
+  const timezone = progressPickupStop?.timezone || data.pickup_timezone;
   
   // Format pickup window
   const pickupWindow = formatTimingPreference(
@@ -1237,7 +1250,7 @@ function buildBookingInProgressEmail(data) {
       </div>
       <div class="detail-row">
         <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}${escapeHtml(unit)}</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
       </div>
       <div class="detail-row">
         <span class="detail-label">Pickup window</span>
@@ -1260,7 +1273,7 @@ function buildBookingInProgressEmail(data) {
     `Crew leader: ${driverName}`,
     `Company: ${companyName}`,
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}${unit}`,
+    `Location: ${location}`,
     `Pickup window: ${pickupWindow}`,
     '',
     'Please ensure access to the service location is available for the crew upon arrival.',
@@ -1290,12 +1303,13 @@ function buildBookingInProgressDropoffEmail(data) {
   console.log('[buildBookingInProgressDropoffEmail] Received data:', JSON.stringify(data, null, 2));
   
   const bookingNumber = data.booking_number || 'N/A';
-  const location = formatAddress(data.destination_address || data.service_address);
-  const unit = data.unit ? `, ${data.unit}` : '';
+  const dropoffStop = getDropoffStop(data.stops) || getPickupStop(data.stops);
+  const location = formatAddress(dropoffStop);
   const companyName = data.company_name || 'your service provider';
   const driverName = data.driver_given_name || 'Your crew';
   const logoUrl = data.logo_url;
-  const timezone = data.service_location_timezone;
+  const dropoffPickupStop = getPickupStop(data.stops);
+  const timezone = dropoffPickupStop?.timezone || data.pickup_timezone;
   
   // Format pickup window
   const pickupWindow = formatTimingPreference(
@@ -1329,7 +1343,7 @@ function buildBookingInProgressDropoffEmail(data) {
       </div>
       <div class="detail-row">
         <span class="detail-label">Dropoff location</span>
-        <span class="detail-value">${escapeHtml(location)}${escapeHtml(unit)}</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
       </div>
       <div class="detail-row">
         <span class="detail-label">Service window</span>
@@ -1352,7 +1366,7 @@ function buildBookingInProgressDropoffEmail(data) {
     `Crew leader: ${driverName}`,
     `Company: ${companyName}`,
     `Booking No.: ${bookingNumber}`,
-    `Dropoff location: ${location}${unit}`,
+    `Dropoff location: ${location}`,
     `Service window: ${pickupWindow}`,
     '',
     'Please ensure access to the dropoff location is available for the crew upon arrival.',
@@ -1382,11 +1396,11 @@ function buildBookingRescheduledEmail(data) {
   console.log('[buildBookingRescheduledEmail] Received data:', JSON.stringify(data, null, 2));
   
   const bookingNumber = data.booking_number || 'N/A';
-  const location = formatAddress(data.service_address);
-  const unit = data.unit ? `, ${data.unit}` : '';
+  const rescheduledPickupStop = getPickupStop(data.stops);
+  const location = formatAddress(rescheduledPickupStop);
   const companyName = data.company_name || 'your service provider';
   const logoUrl = data.logo_url;
-  const timezone = data.service_location_timezone;
+  const timezone = rescheduledPickupStop?.timezone || data.pickup_timezone;
   
   // Format new pickup window
   const newPickupWindow = formatTimingPreference(
@@ -1427,7 +1441,7 @@ function buildBookingRescheduledEmail(data) {
       </div>
       <div class=\"detail-row\">
         <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}${escapeHtml(unit)}</span>
+        <span class=\"detail-value\">${escapeHtml(location)}</span>
       </div>
       ${previousPickupWindow ? `
       <div class=\"detail-row\" style=\"text-decoration: line-through; opacity: 0.6;\">
@@ -1454,7 +1468,7 @@ function buildBookingRescheduledEmail(data) {
     '',
     `Booking No.: ${bookingNumber}`,
     `Company: ${companyName}`,
-    `Location: ${location}${unit}`,
+    `Location: ${location}`,
   ];
 
   if (previousPickupWindow) {
@@ -1516,5 +1530,7 @@ module.exports = {
   normalizeJobType,
   formatTimingPreference,
   formatAddress,
+  getPickupStop,
+  getDropoffStop,
   escapeHtml
 };
