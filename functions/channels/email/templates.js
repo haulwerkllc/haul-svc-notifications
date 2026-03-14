@@ -1512,6 +1512,40 @@ function escapeHtml(text) {
   return text.toString().replace(/[&<>"']/g, m => map[m]);
 }
 
+/**
+ * Build email for "email changed" notification sent to the old address.
+ * Informs user their Haul account email was changed; contact support if not requested.
+ */
+function buildEmailChangedNotification({ oldEmail, newEmail }) {
+  const supportEmail = SUPPORT_EMAIL || 'support@haulwerk.com';
+  const subject = 'Your Haul account email was changed';
+  const preheader = 'Your account email was updated. Contact support if you did not request this change.';
+
+  const bodyContent = `
+    <h1>Your Haul account email was changed</h1>
+    <p>The email address for your Haul account was updated to ${escapeHtml(newEmail)}.</p>
+    <p>If you did not request this change, contact us at <a href="mailto:${escapeHtml(supportEmail)}">${escapeHtml(supportEmail)}</a> right away.</p>
+  `;
+
+  const textParts = [
+    'Your Haul account email was changed',
+    '',
+    `The email address for your Haul account was updated to ${newEmail}.`,
+    '',
+    `If you did not request this change, contact us at ${supportEmail} right away.`,
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({
+      subject,
+      preheader,
+      bodyContent,
+    }),
+    text: textParts.join('\n'),
+  };
+}
+
 module.exports = {
   buildServiceProviderTemplate,
   buildConsumerTemplate,
@@ -1532,5 +1566,6 @@ module.exports = {
   formatAddress,
   getPickupStop,
   getDropoffStop,
-  escapeHtml
+  escapeHtml,
+  buildEmailChangedNotification,
 };

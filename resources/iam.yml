@@ -13,6 +13,16 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/notifications-${sls:stage}
 
+  # Allow EventBridge to invoke the send-email-changed Lambda
+  # Source ARN constructed from known rule naming convention in Terraform (email-changed-{env})
+  SendEmailChangedEventBridgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SendEmailChangedNotificationLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/email-changed-${sls:stage}
+
   # Allow SNS to invoke the SMS inbound handler Lambda
   # Source ARN constructed from known SNS topic naming convention in Terraform
   SmsInboundSNSPermission:

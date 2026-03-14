@@ -107,6 +107,7 @@ custom:
 functions:
   - ${file(./functions/orchestrator/serverless.yml)}
   - ${file(./functions/channels/email/serverless.yml)}
+  - ${file(./functions/email-changed/serverless.yml)}
   - ${file(./functions/channels/push/serverless.yml)}
   - ${file(./functions/channels/sms/serverless.yml)}
   - ${file(./functions/channels/admin/serverless.yml)}

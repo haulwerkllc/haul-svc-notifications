@@ -1,0 +1,6 @@
+sendEmailChangedNotification:
+  handler: functions/email-changed/handler.handler
+  name: haul-svc-notifications-send-email-changed-${sls:stage}
+  description: Send email-change notification to old address when user updates email
+  memorySize: 256
+  timeout: 30
