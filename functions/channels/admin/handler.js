@@ -161,7 +161,8 @@ function normalizeJobType(dataType) {
     'JUNK_REMOVAL': 'Junk Removal',
     'MOVING': 'Moving',
     'E_WASTE': 'E-Waste Recycling',
-    'MUNICIPAL_WASTER': 'Municipal Waste'
+    'MUNICIPAL_WASTER': 'Municipal Waste',
+    'HAZARDOUS_WASTE': 'Hazardous Waste'
   };
   return typeMap[dataType] || dataType;
 }
