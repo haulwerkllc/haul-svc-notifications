@@ -1,4 +1,9 @@
 const NotificationResolver = require('./base');
+const {
+  buildResolverCoarseServiceAreasQuery,
+  normalizeServiceAreaType,
+  isValidGeoShapeGeometry,
+} = require('../../../utils/service-area-geo-query');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
 const { Client } = require('@opensearch-project/opensearch');
@@ -142,7 +147,7 @@ class JobPostedResolver extends NotificationResolver {
 
   /**
    * Find service areas that contain the given location
-   * Uses OpenSearch with radius-based geo-distance calculation
+   * Uses OpenSearch: radius areas (coarse geo_distance + Haversine); polygon/municipality (geo_shape).
    */
   async findMatchingServiceAreas(lat, lon) {
     if (!OPENSEARCH_ENDPOINT) {
@@ -155,36 +160,35 @@ class JobPostedResolver extends NotificationResolver {
       this.openSearchClient = await this.createOpenSearchClient();
     }
 
-    // Query OpenSearch for service areas within radius
     const response = await this.openSearchClient.search({
       index: 'service_areas',
       body: {
-        query: {
-          bool: {
-            must: [
-              {
-                geo_distance: {
-                  distance: '100km', // Maximum search radius
-                  'center': {
-                    lat: lat,
-                    lon: lon
-                  }
-                }
-              }
-            ]
-          }
-        },
-        size: 100 // Limit results
-      }
+        query: buildResolverCoarseServiceAreasQuery(lat, lon),
+        size: 100,
+      },
     });
 
     const hits = response.body.hits.hits || [];
-    
-    // Filter by actual radius_km from each service area
+
     const matchingAreas = hits
-      .map(hit => hit._source)
-      .filter(serviceArea => {
-        if (!serviceArea.center || !serviceArea.radius_km) {
+      .map((hit) => hit._source)
+      .filter((serviceArea) => {
+        const t = normalizeServiceAreaType(serviceArea.type);
+        if (t === 'polygon' || t === 'municipality') {
+          if (!isValidGeoShapeGeometry(serviceArea.geometry)) {
+            console.warn('[JobPostedResolver] Skipping hit: invalid geometry', {
+              id: serviceArea.id,
+              company_id: serviceArea.company_id,
+            });
+            return false;
+          }
+          return true;
+        }
+
+        if (!serviceArea.center || typeof serviceArea.center.lat !== 'number' || typeof serviceArea.center.lon !== 'number') {
+          return false;
+        }
+        if (typeof serviceArea.radius_km !== 'number' || serviceArea.radius_km <= 0 || !Number.isFinite(serviceArea.radius_km)) {
           return false;
         }
 
@@ -192,7 +196,7 @@ class JobPostedResolver extends NotificationResolver {
           lat,
           lon,
           serviceArea.center.lat,
-          serviceArea.center.lon
+          serviceArea.center.lon,
         );
 
         return distance <= serviceArea.radius_km;
