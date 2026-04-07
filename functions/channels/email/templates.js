@@ -283,7 +283,7 @@ function buildConsumerTemplate({ subject, preheader, bodyContent, footerNote }) 
 function normalizeJobType(jobType) {
   const map = {
     'JUNK_REMOVAL': 'junk removal',
-    'MOVING': 'small-medium moving'
+    'MOVING': 'moving'
   };
   return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
 }
@@ -426,8 +426,8 @@ function buildJobPostedEmail(jobData) {
   const preheader = `A new ${jobType} job is available in your service area.`;
   
   const bodyContent = `
-    <h1>New job posted – submit your bid</h1>
-    <p>A ${jobType} job is ready for bids in your service area.</p>
+    <h1>New job posted – review, bid, or book now!</h1>
+    <p>A ${jobType} job is ready for booking in your service area.</p>
     
     <div style="margin: 24px 0;">
       <div class="detail-row">
@@ -451,9 +451,9 @@ function buildJobPostedEmail(jobData) {
   
   // Plain text version
   const textParts = [
-    'New job posted – submit your bid',
+    'New job posted – review, bid, or book now!',
     '',
-    `A ${jobType} job is ready for bids in your service area.`,
+    `A ${jobType} job is ready for booking in your service area.`,
     '',
     `Location: ${location}`,
     `Timing: ${timing}`
@@ -711,7 +711,7 @@ function buildBookingCreatedEmail(data) {
   const jobTypeDisplay = jobType === 'JUNK_REMOVAL' 
     ? 'junk removal' 
     : jobType === 'MOVING' 
-    ? 'small-medium moving' 
+    ? 'moving' 
     : jobType.toLowerCase().replace(/_/g, ' ');
   
   console.log('[buildBookingCreatedEmail] jobTypeDisplay:', jobTypeDisplay);
