@@ -15,6 +15,11 @@ const BookingAssignedResolver = require('./booking_assigned_resolver');
 const BookingInProgressPickupResolver = require('./booking_in_progress_pickup_resolver');
 const BookingInProgressDropoffResolver = require('./booking_in_progress_dropoff_resolver');
 const BookingRescheduledResolver = require('./booking_rescheduled_resolver');
+const BookingCompletedResolver = require('./booking_completed_resolver');
+const BookingCanceledResolver = require('./booking_canceled_resolver');
+const PaymentAuthorizationFailedResolver = require('./payment_authorization_failed_resolver');
+const PaymentCapturedResolver = require('./payment_captured_resolver');
+const PayoutSentResolver = require('./payout_sent_resolver');
 
 // Initialize resolver instances
 const resolvers = [
@@ -27,7 +32,12 @@ const resolvers = [
   new BookingAssignedResolver(),
   new BookingInProgressPickupResolver(),
   new BookingInProgressDropoffResolver(),
-  new BookingRescheduledResolver()
+  new BookingRescheduledResolver(),
+  new BookingCompletedResolver(),
+  new BookingCanceledResolver(),
+  new PaymentAuthorizationFailedResolver(),
+  new PaymentCapturedResolver(),
+  new PayoutSentResolver()
 ];
 
 // Build registry keyed by event_type

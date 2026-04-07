@@ -69,27 +69,29 @@ class JobPostedResolver extends NotificationResolver {
 
       // Step 2: Extract location from PICKUP stop
       const pickupStop = job.stops?.find(s => s.stop_type === 'PICKUP') || job.stops?.[0];
-      if (!pickupStop || !pickupStop.lat || !pickupStop.lon) {
+      const pickupLat = pickupStop?.location?.lat;
+      const pickupLon = pickupStop?.location?.lon;
+      if (!pickupStop || typeof pickupLat !== 'number' || typeof pickupLon !== 'number') {
         console.warn('[JobPostedResolver] Job has no PICKUP stop with lat/lon', { job_id: jobId });
         return [];
       }
 
       console.log('[JobPostedResolver] Job pickup location', {
         job_id: jobId,
-        lat: pickupStop.lat,
-        lon: pickupStop.lon
+        lat: pickupLat,
+        lon: pickupLon
       });
 
       // Step 3: Query OpenSearch for matching service areas
       const matchingServiceAreas = await this.findMatchingServiceAreas(
-        pickupStop.lat,
-        pickupStop.lon
+        pickupLat,
+        pickupLon
       );
 
       if (matchingServiceAreas.length === 0) {
         console.info('[JobPostedResolver] No service areas match job location', {
           job_id: jobId,
-          location: { lat: pickupStop.lat, lon: pickupStop.lon }
+          location: { lat: pickupLat, lon: pickupLon }
         });
         return [];
       }

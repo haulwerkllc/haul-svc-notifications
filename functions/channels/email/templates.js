@@ -423,6 +423,7 @@ function buildJobPostedEmail(jobData) {
   const biddingClosesAt = jobData.bidding_closes_at ? formatBiddingDeadline(jobData.bidding_closes_at, timezone) : null;
   
   const subject = `New ${jobType} job available`;
+  const preheader = `A new ${jobType} job is available in your service area.`;
   
   const bodyContent = `
     <h1>New job posted – submit your bid</h1>
@@ -490,255 +491,6 @@ function buildJobPostedEmail(jobData) {
 /**
  * Build bid created email for consumers
  */
-function buildBidCreatedEmail(data) {
-  const companyName = data.company_name || 'A service provider';
-  const bidAmount = data.bid_amount_formatted || 'Price not specified';
-  const jobType = data.job_type_formatted || 'hauling';
-  const location = data.location_formatted || 'Your job location';
-  const pickupWindow = data.pickup_window_formatted || 'Flexible';
-  const notes = data.notes;
-  const companyLogoUrl = data.company_logo_url;
-  const bidId = data.bid_id;
-  const pickupStop = getPickupStop(data.stops);
-  const timezone = pickupStop?.timezone || data.pickup_timezone;
-  const biddingClosesAt = data.bidding_closes_at ? formatBiddingDeadline(data.bidding_closes_at, timezone) : 'the deadline';
-  
-  const subject = 'You received a new quote on your job';
-  const preheader = `${companyName} submitted a ${bidAmount} quote`;
-  
-  // Company logo (if available)
-  const companyLogoHtml = companyLogoUrl 
-    ? `<img src="${escapeHtml(companyLogoUrl)}" alt="${escapeHtml(companyName)} logo" style="max-width:120px;height:auto;margin:0 auto 16px;display:block;" />`
-    : '';
-  
-  const bodyContent = `
-    <h1>New quote received</h1>
-    <p>${escapeHtml(companyName)} has submitted a quote on your ${escapeHtml(jobType)} job.</p>
-    
-    ${companyLogoHtml}
-    
-    <div style="margin: 24px 0;">
-      <div class="detail-row">
-        <span class="detail-label">Quoted amount</span>
-        <span class="detail-value" style="font-weight: 600;">${escapeHtml(bidAmount)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Company</span>
-        <span class="detail-value">${escapeHtml(companyName)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Service window</span>
-        <span class="detail-value">${escapeHtml(pickupWindow)}</span>
-      </div>
-    </div>
-    
-    ${notes ? `<p style="margin: 16px 0; padding: 12px; background-color: #f9fafb; border-radius: 6px; font-size: 14px;"><strong>Provider notes:</strong> ${escapeHtml(notes)}</p>` : ''}
-    
-    <p>To book your service, review and select a quote by ${escapeHtml(biddingClosesAt)} in the Haul app.</p>
-    
-    <div class="cta">
-      <a href="${BASE_URL}/bids/${bidId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review quote</a>
-    </div>
-  `;
-  
-  // Plain text version
-  const textParts = [
-    'New quote received',
-    '',
-    `${companyName} has submitted a quote on your ${jobType} job.`,
-    '',
-    `Quoted amount: ${bidAmount}`,
-    `Company: ${companyName}`,
-    `Location: ${location}`,
-    `Service window: ${pickupWindow}`
-  ];
-  
-  if (notes) {
-    textParts.push('');
-    textParts.push(`Provider notes: ${notes}`);
-  }
-  
-  textParts.push('');
-  textParts.push(`To book your service, review and select a quote by ${biddingClosesAt} in the Haul app.`);
-  textParts.push('');
-  textParts.push(`Review quote: ${BASE_URL}/bids/${bidId}`);
-  textParts.push('');
-  textParts.push('---');
-  textParts.push('You received this because you posted a job on Haul.');
-  textParts.push(`Update preferences: ${BASE_URL}/user/preferences`);
-  textParts.push(`Contact support: ${SUPPORT_EMAIL}`);
-  
-  return {
-    subject,
-    html: buildConsumerTemplate({
-      subject,
-      preheader,
-      bodyContent
-    }),
-    text: textParts.join('\n')
-  };
-}
-
-/**
- * Build bid updated email for consumers
- */
-function buildBidUpdatedEmail(data) {
-  const companyName = data.company_name || 'A service provider';
-  const bidAmount = data.bid_amount_formatted || 'Price not specified';
-  const jobType = data.job_type_formatted || 'hauling';
-  const location = data.location_formatted || 'Your job location';
-  const pickupWindow = data.pickup_window_formatted || 'Flexible';
-  const notes = data.notes;
-  const companyLogoUrl = data.company_logo_url;
-  const bidId = data.bid_id;
-  const pickupStop = getPickupStop(data.stops);
-  const timezone = pickupStop?.timezone || data.pickup_timezone;
-  const biddingClosesAt = data.bidding_closes_at ? formatBiddingDeadline(data.bidding_closes_at, timezone) : 'the deadline';
-  
-  const subject = 'A quote on your job was updated';
-  const preheader = `${companyName} updated their quote to ${bidAmount}`;
-  
-  // Company logo (if available)
-  const companyLogoHtml = companyLogoUrl 
-    ? `<img src="${escapeHtml(companyLogoUrl)}" alt="${escapeHtml(companyName)} logo" style="max-width:120px;height:auto;margin:0 auto 16px;display:block;" />`
-    : '';
-  
-  const bodyContent = `
-    <h1>Quote updated</h1>
-    <p>${escapeHtml(companyName)} has updated their quote on your ${escapeHtml(jobType)} job.</p>
-    
-    ${companyLogoHtml}
-    
-    <div style="margin: 24px 0;">
-      <div class="detail-row">
-        <span class="detail-label">Updated quote</span>
-        <span class="detail-value" style="font-weight: 600;">${escapeHtml(bidAmount)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Company</span>
-        <span class="detail-value">${escapeHtml(companyName)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Service window</span>
-        <span class="detail-value">${escapeHtml(pickupWindow)}</span>
-      </div>
-    </div>
-    
-    ${notes ? `<p style="margin: 16px 0; padding: 12px; background-color: #f9fafb; border-radius: 6px; font-size: 14px;"><strong>Provider notes:</strong> ${escapeHtml(notes)}</p>` : ''}
-    
-    <p>To book your service, review and select a quote by ${escapeHtml(biddingClosesAt)} in the Haul app.</p>
-    
-    <div class="cta">
-      <a href="${BASE_URL}/bids/${bidId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review quote</a>
-    </div>
-  `;
-  
-  // Plain text version
-  const textParts = [
-    'Quote updated',
-    '',
-    `${companyName} has updated their quote on your ${jobType} job.`,
-    '',
-    `Updated quote: ${bidAmount}`,
-    `Company: ${companyName}`,
-    `Location: ${location}`,
-    `Service window: ${pickupWindow}`
-  ];
-  
-  if (notes) {
-    textParts.push('');
-    textParts.push(`Provider notes: ${notes}`);
-  }
-  
-  textParts.push('');
-  textParts.push(`To book your service, review and select a quote by ${biddingClosesAt} in the Haul app.`);
-  textParts.push('');
-  textParts.push(`Review quote: ${BASE_URL}/bids/${bidId}`);
-  textParts.push('');
-  textParts.push('---');
-  textParts.push('You received this because you posted a job on Haul.');
-  textParts.push(`Update preferences: ${BASE_URL}/user/preferences`);
-  textParts.push(`Contact support: ${SUPPORT_EMAIL}`);
-  
-  return {
-    subject,
-    html: buildConsumerTemplate({
-      subject,
-      preheader,
-      bodyContent
-    }),
-    text: textParts.join('\n')
-  };
-}
-
-/**
- * Build job canceled email for service providers
- */
-function buildJobCanceledEmail(data) {
-  const jobType = data.job_type_formatted || 'hauling';
-  const location = data.location_formatted || 'Location not specified';
-  const description = data.description;
-  
-  const subject = 'A job you bid on was canceled';
-  const preheader = 'The customer has canceled this job';
-  
-  const bodyContent = `
-    <h1>Job canceled</h1>
-    <p>The ${escapeHtml(jobType)} job you submitted a bid on has been canceled by the customer.</p>
-    
-    <div style="margin: 24px 0;">
-      <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
-      </div>
-    </div>
-    
-    ${description ? `<p style="margin: 16px 0; color: #6b7280; font-size: 14px;">${escapeHtml(description.substring(0, 100))}${description.length > 100 ? '...' : ''}</p>` : ''}
-    
-    <p>No further action is required. Your bid has been automatically withdrawn.</p>
-  `;
-  
-  // Plain text version
-  const textParts = [
-    'Job canceled',
-    '',
-    `The ${jobType} job you submitted a bid on has been canceled by the customer.`,
-    '',
-    `Location: ${location}`
-  ];
-  
-  if (description) {
-    textParts.push('');
-    textParts.push(description.substring(0, 100) + (description.length > 100 ? '...' : ''));
-  }
-  
-  textParts.push('');
-  textParts.push('No further action is required. Your bid has been automatically withdrawn.');
-  textParts.push('');
-  textParts.push('---');
-  textParts.push('You received this because you submitted a bid on this job.');
-  textParts.push(`Update preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`);
-  textParts.push(`Contact support: ${SUPPORT_EMAIL}`);
-  
-  return {
-    subject,
-    html: buildServiceProviderTemplate({
-      subject,
-      preheader,
-      bodyContent
-    }),
-    text: textParts.join('\n')
-  };
-}
-
 /**
  * Build job closed email for consumers
  * 
@@ -1204,45 +956,117 @@ function buildBookingAssignedDriverEmail(data) {
 }
 
 /**
- * Build booking in progress email for CUSTOMER
- * Notifies customer that their service has started and the crew is en route
+ * Build booking created email for CUSTOMER (instant book accepted by company)
+ * Notifies customer that a company has accepted their instant book price
  */
-function buildBookingInProgressEmail(data) {
-  console.log('[buildBookingInProgressEmail] Received data:', JSON.stringify(data, null, 2));
-  
+function buildBookingCreatedCustomerEmail(data) {
+  console.log('[buildBookingCreatedCustomerEmail] Received data:', JSON.stringify(data, null, 2));
+
   const bookingNumber = data.booking_number || 'N/A';
-  const progressPickupStop = getPickupStop(data.stops);
-  const location = formatAddress(progressPickupStop);
-  const companyName = data.company_name || 'your service provider';
-  const driverName = data.driver_given_name || 'Your crew';
+  const amountCents = data.amount_cents || 0;
+  const amountDollars = (amountCents / 100).toFixed(2);
+  const pickupStop = getPickupStop(data.stops);
+  const location = formatAddress(pickupStop);
+  const companyName = data.company_name || 'a service provider';
   const logoUrl = data.logo_url;
-  const timezone = progressPickupStop?.timezone || data.pickup_timezone;
-  
-  // Format pickup window
+
+  const subject = `Booking confirmed – ${escapeHtml(companyName)} is on it`;
+  const preheader = `Your instant booking has been accepted.`;
+
+  const bodyContent = `
+    <h1>Your booking is confirmed</h1>
+    <p>${escapeHtml(companyName)} has accepted your instant book price and your job is booked.</p>
+    ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}" style="max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;">` : ''}
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Provider</span>
+        <span class="detail-value">${escapeHtml(companyName)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Amount</span>
+        <span class="detail-value">$${escapeHtml(amountDollars)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+    </div>
+    <p>You'll receive updates as your crew is assigned and your service day approaches.</p>
+    <div class="cta">
+      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Your booking is confirmed',
+    '',
+    `${companyName} has accepted your instant book price and your job is booked.`,
+    '',
+    `Booking No.: ${bookingNumber}`,
+    `Provider: ${companyName}`,
+    `Amount: $${amountDollars}`,
+    `Location: ${location}`,
+    '',
+    "You'll receive updates as your crew is assigned and your service day approaches.",
+    '',
+    `View booking: ${BASE_URL}/bookings`,
+    '',
+    '---',
+    'You received this because you created an instant booking.',
+    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build booking assigned email for SERVICE PROVIDER (OWNER/ADMIN/DISPATCHER)
+ * Notifies provider users that a driver has been assigned to their booking
+ */
+function buildBookingAssignedProviderEmail(data) {
+  console.log('[buildBookingAssignedProviderEmail] Received data:', JSON.stringify(data, null, 2));
+
+  const bookingNumber = data.booking_number || 'N/A';
+  const driverPickupStop = getPickupStop(data.stops);
+  const location = formatAddress(driverPickupStop);
+  const companyName = data.company_name || 'your company';
+  const driverName = data.driver_given_name || 'A crew member';
+  const logoUrl = data.logo_url;
+  const timezone = driverPickupStop?.timezone || data.pickup_timezone;
+
   const pickupWindow = formatTimingPreference(
     'SCHEDULED',
     data.pickup_window_start,
     data.pickup_window_end,
     timezone
   );
-  
-  const subject = `Your service has started – Booking ${bookingNumber}`;
-  const preheader = `${driverName} from ${companyName} is on the way.`;
+
+  const subject = `Driver assigned to booking ${bookingNumber}`;
+  const preheader = `${driverName} has been assigned and is ready to go.`;
+
+  const logoHtml = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}" style="max-width: 120px; height: auto; margin: 0 0 24px 0; display: block;">`
+    : '';
 
   const bodyContent = `
-    <h1>Your service is underway</h1>
-    <p>${escapeHtml(driverName)} from ${escapeHtml(companyName)} has started your job and is en route to your location.</p>
-    
-    ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}" style="max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;">` : ''}
-    
+    <h1>Driver assigned</h1>
+    <p>${escapeHtml(driverName)} has been assigned to this booking.</p>
+    ${logoHtml}
     <div style="margin: 24px 0;">
       <div class="detail-row">
-        <span class="detail-label">Crew leader</span>
+        <span class="detail-label">Driver</span>
         <span class="detail-value">${escapeHtml(driverName)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Company</span>
-        <span class="detail-value">${escapeHtml(companyName)}</span>
       </div>
       <div class="detail-row">
         <span class="detail-label">Booking No.</span>
@@ -1257,32 +1081,26 @@ function buildBookingInProgressEmail(data) {
         <span class="detail-value">${escapeHtml(pickupWindow)}</span>
       </div>
     </div>
-    
-    <p>Please ensure access to the service location is available for the crew upon arrival.</p>
-    
     <div class="cta">
-      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
+      <a href="${DISPATCHER_BASE_URL}/dashboard/jobs/booked/${escapeHtml(bookingNumber)}" class="cta-button">View booking</a>
     </div>
   `;
 
   const textParts = [
-    'Your service is underway',
+    'Driver assigned',
     '',
-    `${driverName} from ${companyName} has started your job and is en route to your location.`,
+    `${driverName} has been assigned to booking ${bookingNumber}.`,
     '',
-    `Crew leader: ${driverName}`,
-    `Company: ${companyName}`,
+    `Driver: ${driverName}`,
     `Booking No.: ${bookingNumber}`,
     `Location: ${location}`,
     `Pickup window: ${pickupWindow}`,
     '',
-    'Please ensure access to the service location is available for the crew upon arrival.',
-    '',
-    `View booking: ${BASE_URL}/bookings`,
+    `View booking: ${DISPATCHER_BASE_URL}/dashboard/jobs/booked/${bookingNumber}`,
     '',
     '---',
-    'You received this because your service has started.',
-    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
+    'You received this because a driver was assigned to a booking in your company.',
+    `Manage your notification preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
@@ -1290,92 +1108,157 @@ function buildBookingInProgressEmail(data) {
 
   return {
     subject,
-    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    html: buildServiceProviderTemplate({ subject, preheader, bodyContent }),
     text: textParts.join('\n')
   };
 }
 
 /**
- * Build booking in progress dropoff email for CUSTOMER
- * Notifies customer that dropoff phase has started (MOVE jobs only)
+ * Build booking completed email for SERVICE PROVIDER (OWNER/ADMIN/DISPATCHER)
  */
-function buildBookingInProgressDropoffEmail(data) {
-  console.log('[buildBookingInProgressDropoffEmail] Received data:', JSON.stringify(data, null, 2));
-  
+function buildBookingCompletedProviderEmail(data) {
   const bookingNumber = data.booking_number || 'N/A';
-  const dropoffStop = getDropoffStop(data.stops) || getPickupStop(data.stops);
-  const location = formatAddress(dropoffStop);
-  const companyName = data.company_name || 'your service provider';
-  const driverName = data.driver_given_name || 'Your crew';
-  const logoUrl = data.logo_url;
-  const dropoffPickupStop = getPickupStop(data.stops);
-  const timezone = dropoffPickupStop?.timezone || data.pickup_timezone;
-  
-  // Format pickup window
-  const pickupWindow = formatTimingPreference(
-    'SCHEDULED',
-    data.pickup_window_start,
-    data.pickup_window_end,
-    timezone
-  );
-  
-  const subject = `Dropoff in progress – Booking ${bookingNumber}`;
-  const preheader = `${driverName} from ${companyName} is heading to dropoff location.`;
+  const amountCents = data.amount_cents || 0;
+  const amountDollars = (amountCents / 100).toFixed(2);
+  const pickupStop = getPickupStop(data.stops);
+  const location = formatAddress(pickupStop);
+  const timezone = pickupStop?.timezone || data.pickup_timezone;
+  const completedAt = data.completed_at
+    ? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone || 'UTC' }).format(new Date(data.completed_at))
+    : 'N/A';
+
+  const subject = `Booking ${bookingNumber} complete`;
+  const preheader = `Booking ${bookingNumber} has been marked complete.`;
 
   const bodyContent = `
-    <h1>Dropoff in progress</h1>
-    <p>${escapeHtml(driverName)} from ${escapeHtml(companyName)} has loaded the items and is now en route to the dropoff location.</p>
-    
-    ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(companyName)}" style="max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;">` : ''}
-    
+    <h1>Booking complete</h1>
+    <p>Booking <strong>${escapeHtml(bookingNumber)}</strong> has been completed.</p>
+
     <div style="margin: 24px 0;">
       <div class="detail-row">
-        <span class="detail-label">Crew leader</span>
-        <span class="detail-value">${escapeHtml(driverName)}</span>
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Amount</span>
+        <span class="detail-value">$${escapeHtml(amountDollars)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Completed</span>
+        <span class="detail-value">${escapeHtml(completedAt)}</span>
+      </div>
+    </div>
+
+    <p>Payment is being processed and will be released to your account after the standard hold period.</p>
+
+    <div class="cta">
+      <a href="${DISPATCHER_BASE_URL}/bookings/${data.booking_id}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    `Booking ${bookingNumber} complete`,
+    '',
+    `Booking ${bookingNumber} has been completed.`,
+    '',
+    `Booking No.: ${bookingNumber}`,
+    `Location: ${location}`,
+    `Amount: $${amountDollars}`,
+    `Completed: ${completedAt}`,
+    '',
+    'Payment is being processed and will be released to your account after the standard hold period.',
+    '',
+    `View booking: ${DISPATCHER_BASE_URL}/bookings/${data.booking_id}`,
+    '',
+    '---',
+    'You received this because a booking your company managed was completed.',
+    `Manage preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildServiceProviderTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build booking completed email for CUSTOMER
+ */
+function buildBookingCompletedCustomerEmail(data) {
+  const bookingNumber = data.booking_number || 'N/A';
+  const companyName = data.company_name || 'your service provider';
+  const amountCents = data.amount_cents || 0;
+  const amountDollars = (amountCents / 100).toFixed(2);
+  const pickupStop = getPickupStop(data.stops);
+  const location = formatAddress(pickupStop);
+  const timezone = pickupStop?.timezone || data.pickup_timezone;
+  const completedAt = data.completed_at
+    ? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone || 'UTC' }).format(new Date(data.completed_at))
+    : 'N/A';
+
+  const subject = `Your service is complete – Booking ${bookingNumber}`;
+  const preheader = `${companyName} has completed your service.`;
+
+  const bodyContent = `
+    <h1>Service complete</h1>
+    <p>${escapeHtml(companyName)} has completed your service.</p>
+
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
       </div>
       <div class="detail-row">
         <span class="detail-label">Company</span>
         <span class="detail-value">${escapeHtml(companyName)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Booking No.</span>
-        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Dropoff location</span>
+        <span class="detail-label">Location</span>
         <span class="detail-value">${escapeHtml(location)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Service window</span>
-        <span class="detail-value">${escapeHtml(pickupWindow)}</span>
+        <span class="detail-label">Completed</span>
+        <span class="detail-value">${escapeHtml(completedAt)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Amount charged</span>
+        <span class="detail-value">$${escapeHtml(amountDollars)}</span>
       </div>
     </div>
-    
-    <p>Please ensure access to the dropoff location is available for the crew upon arrival.</p>
-    
+
+    <p>We hope everything went smoothly. Your receipt will follow once payment is processed.</p>
+
     <div class="cta">
       <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
     </div>
   `;
 
   const textParts = [
-    'Dropoff in progress',
+    `Your service is complete – Booking ${bookingNumber}`,
     '',
-    `${driverName} from ${companyName} has loaded the items and is now en route to the dropoff location.`,
+    `${companyName} has completed your service.`,
     '',
-    `Crew leader: ${driverName}`,
-    `Company: ${companyName}`,
     `Booking No.: ${bookingNumber}`,
-    `Dropoff location: ${location}`,
-    `Service window: ${pickupWindow}`,
+    `Company: ${companyName}`,
+    `Location: ${location}`,
+    `Completed: ${completedAt}`,
+    `Amount charged: $${amountDollars}`,
     '',
-    'Please ensure access to the dropoff location is available for the crew upon arrival.',
+    'We hope everything went smoothly. Your receipt will follow once payment is processed.',
     '',
     `View booking: ${BASE_URL}/bookings`,
     '',
     '---',
-    'You received this because your dropoff is in progress.',
-    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
+    'You received this because your booking was completed.',
+    `Manage preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
@@ -1389,110 +1272,491 @@ function buildBookingInProgressDropoffEmail(data) {
 }
 
 /**
- * Build booking rescheduled email for CUSTOMER
- * Notifies customer that the service provider has updated the pickup window
+ * Build booking canceled email for SERVICE PROVIDER (OWNER/ADMIN/DISPATCHER)
  */
-function buildBookingRescheduledEmail(data) {
-  console.log('[buildBookingRescheduledEmail] Received data:', JSON.stringify(data, null, 2));
-  
+function buildBookingCanceledProviderEmail(data) {
   const bookingNumber = data.booking_number || 'N/A';
-  const rescheduledPickupStop = getPickupStop(data.stops);
-  const location = formatAddress(rescheduledPickupStop);
-  const companyName = data.company_name || 'your service provider';
-  const logoUrl = data.logo_url;
-  const timezone = rescheduledPickupStop?.timezone || data.pickup_timezone;
-  
-  // Format new pickup window
-  const newPickupWindow = formatTimingPreference(
-    'SCHEDULED',
-    data.pickup_window_start,
-    data.pickup_window_end,
-    timezone
-  );
+  const pickupStop = getPickupStop(data.stops);
+  const location = formatAddress(pickupStop);
 
-  // Format previous pickup window if available
-  let previousPickupWindow = null;
-  if (data.previous_pickup_window_start && data.previous_pickup_window_end) {
-    previousPickupWindow = formatTimingPreference(
-      'SCHEDULED',
-      data.previous_pickup_window_start,
-      data.previous_pickup_window_end,
-      timezone
-    );
-  }
-
-  const subject = 'Your booking has been rescheduled';
-  const preheader = 'Your service provider has updated the pickup time.';
+  const subject = `Booking ${bookingNumber} canceled`;
+  const preheader = `Booking ${bookingNumber} has been canceled.`;
 
   const bodyContent = `
-    <h1>Your booking has been rescheduled</h1>
-    <p>${escapeHtml(companyName)} has updated the pickup time for your booking.</p>
-    
-    ${logoUrl ? `<img src=\"${escapeHtml(logoUrl)}\" alt=\"${escapeHtml(companyName)}\" style=\"max-width: 120px; height: auto; margin: 16px 0 24px 0; display: block;\">` : ''}
-    
-    <div style=\"margin: 24px 0;\">
-      <div class=\"detail-row\">
-        <span class=\"detail-label\">Booking No.</span>
-        <span class=\"detail-value\">${escapeHtml(bookingNumber)}</span>
+    <h1>Booking canceled</h1>
+    <p>Booking <strong>${escapeHtml(bookingNumber)}</strong> has been canceled.</p>
+
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
       </div>
-      <div class=\"detail-row\">
-        <span class=\"detail-label\">Company</span>
-        <span class=\"detail-value\">${escapeHtml(companyName)}</span>
-      </div>
-      <div class=\"detail-row\">
-        <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}</span>
-      </div>
-      ${previousPickupWindow ? `
-      <div class=\"detail-row\" style=\"text-decoration: line-through; opacity: 0.6;\">
-        <span class=\"detail-label\">Previous pickup</span>
-        <span class=\"detail-value\">${escapeHtml(previousPickupWindow)}</span>
-      </div>` : ''}
-      <div class=\"detail-row\" style=\"font-weight: 500;\">
-        <span class=\"detail-label\">New pickup window</span>
-        <span class=\"detail-value\">${escapeHtml(newPickupWindow)}</span>
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
       </div>
     </div>
-    
-    <p>If you have any questions about the new schedule, please contact ${escapeHtml(companyName)} directly.</p>
-    
-    <div class=\"cta\">
-      <a href=\"${BASE_URL}/bookings\" class=\"cta-button\" style=\"color:#ffffff !important;text-decoration:none;\">View booking</a>
+
+    <p>No further action is required for this booking.</p>
+
+    <div class="cta">
+      <a href="${DISPATCHER_BASE_URL}/bookings/${data.booking_id}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
     </div>
   `;
 
   const textParts = [
-    'Your booking has been rescheduled',
+    `Booking ${bookingNumber} canceled`,
     '',
-    `${companyName} has updated the pickup time for your booking.`,
+    `Booking ${bookingNumber} has been canceled.`,
+    '',
+    `Booking No.: ${bookingNumber}`,
+    `Location: ${location}`,
+    '',
+    'No further action is required for this booking.',
+    '',
+    `View booking: ${DISPATCHER_BASE_URL}/bookings/${data.booking_id}`,
+    '',
+    '---',
+    'You received this because a booking your company managed was canceled.',
+    `Manage preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildServiceProviderTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build booking canceled email for CUSTOMER
+ */
+function buildBookingCanceledCustomerEmail(data) {
+  const bookingNumber = data.booking_number || 'N/A';
+  const companyName = data.company_name || 'your service provider';
+  const pickupStop = getPickupStop(data.stops);
+  const location = formatAddress(pickupStop);
+
+  const subject = `Booking ${bookingNumber} canceled`;
+  const preheader = `Your booking with ${companyName} has been canceled.`;
+
+  const bodyContent = `
+    <h1>Your booking was canceled</h1>
+    <p>Your booking with <strong>${escapeHtml(companyName)}</strong> has been canceled.</p>
+
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Company</span>
+        <span class="detail-value">${escapeHtml(companyName)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+    </div>
+
+    <p>If a charge was made, any applicable refund will be processed within 5-10 business days. Contact us if you have questions.</p>
+
+    <div class="cta">
+      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View bookings</a>
+    </div>
+  `;
+
+  const textParts = [
+    `Booking ${bookingNumber} canceled`,
+    '',
+    `Your booking with ${companyName} has been canceled.`,
     '',
     `Booking No.: ${bookingNumber}`,
     `Company: ${companyName}`,
     `Location: ${location}`,
+    '',
+    'If a charge was made, any applicable refund will be processed within 5-10 business days. Contact us if you have questions.',
+    '',
+    `View bookings: ${BASE_URL}/bookings`,
+    '',
+    '---',
+    'You received this because your booking was canceled.',
+    `Manage preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
   ];
 
-  if (previousPickupWindow) {
-    textParts.push(`Previous pickup: ${previousPickupWindow}`);
-  }
-  
-  textParts.push(
-    `New pickup window: ${newPickupWindow}`,
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build payment authorization failed email for CUSTOMER
+ */
+function buildPaymentAuthorizationFailedEmail(data) {
+  const bookingNumber = data.booking_number || 'N/A';
+
+  const subject = 'Payment authorization failed';
+  const preheader = 'We could not authorize payment for your booking.';
+
+  const bodyContent = `
+    <h1>Payment authorization failed</h1>
+    <p>We were unable to authorize the payment method on file for your booking.</p>
+
+    ${bookingNumber !== 'N/A' ? `
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>
+    </div>` : ''}
+
+    <p>This may be due to insufficient funds, an expired card, or a block placed by your bank. Please update your payment method or contact your bank for details.</p>
+
+    <div class="cta">
+      <a href="${BASE_URL}/settings/payment" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Update payment method</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Payment authorization failed',
     '',
-    `If you have any questions about the new schedule, please contact ${companyName} directly.`,
+    'We were unable to authorize the payment method on file for your booking.',
+    '',
+    ...(bookingNumber !== 'N/A' ? [`Booking No.: ${bookingNumber}`, ''] : []),
+    'This may be due to insufficient funds, an expired card, or a block placed by your bank.',
+    'Please update your payment method or contact your bank for details.',
+    '',
+    `Update payment method: ${BASE_URL}/settings/payment`,
+    '',
+    '---',
+    'You received this because a payment for your booking could not be authorized.',
+    `Manage preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Build payment captured (receipt) email for CUSTOMER
+ *
+ * Renders a full itemized receipt matching the in-app PDF receipt.
+ * Requires data enriched by PaymentCapturedResolver:
+ *   invoice_aggregate: { booking_amount_cents, trust_fee_amount_cents, tax_amount_cents,
+ *                        tip_amount_cents, trust_fee_pct, trust_fee_cap_cents, total_cents }
+ *   payment_method:    { brand, last4, captured_at, captured_amount_cents }
+ *   stops, company_name, driver_given_name, job_type, invoice_number,
+ *   completed_at, created_at, platform_legal_name, platform_address, support_email
+ */
+function buildPaymentCapturedEmail(data) {
+  const bookingNumber = data.booking_number || 'N/A';
+  const invoiceNumber = data.invoice_number || bookingNumber;
+  const companyName = data.company_name || 'your service provider';
+  const driverGivenName = data.driver_given_name || null;
+  const jobType = data.job_type ? normalizeJobType(data.job_type) : 'Service';
+  const pickupStop = getPickupStop(data.stops);
+  const dropoffStop = data.stops ? data.stops.find(s => s.stop_type === 'DROPOFF') : null;
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
+  const timezone = pickupStop?.timezone || data.pickup_timezone;
+
+  const agg = data.invoice_aggregate;
+  const pm = data.payment_method;
+
+  const totalCents = agg ? agg.total_cents : (data.amount_cents || 0);
+  const totalFormatted = formatCentsToDisplay(totalCents);
+
+  const completedAt = data.completed_at
+    ? formatReceiptDate(data.completed_at, timezone)
+    : null;
+  const createdAt = data.created_at
+    ? formatReceiptDate(data.created_at, timezone)
+    : null;
+
+  const provider = [companyName, driverGivenName].filter(Boolean).join(' — ');
+
+  const platformLegalName = data.platform_legal_name || 'Haulwerk, LLC';
+  const platformAddress = data.platform_address || '';
+  const supportEmail = data.support_email || SUPPORT_EMAIL;
+
+  const subject = `Receipt for booking ${bookingNumber}`;
+  const preheader = `${totalFormatted} charged for your ${jobType} service.`;
+
+  // --- Line items table ---
+  let lineItemsRows = '';
+  if (agg) {
+    // Trust fee label
+    let trustFeeLabel = 'Service &amp; Trust Fee';
+    if (agg.trust_fee_pct != null) {
+      trustFeeLabel += ` (${Math.round(agg.trust_fee_pct * 100)}%)`;
+    }
+
+    lineItemsRows += `
+      <tr>
+        <td style="padding: 6px 0; vertical-align: top;">${escapeHtml(jobType)}</td>
+        <td style="padding: 6px 0; text-align: right; white-space: nowrap; font-weight: 600;">${formatCentsToDisplay(agg.booking_amount_cents)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 6px 0; vertical-align: top; color: #6b7280; font-size: 13px;">${trustFeeLabel}</td>
+        <td style="padding: 6px 0; text-align: right; white-space: nowrap; color: #6b7280; font-size: 13px;">${formatCentsToDisplay(agg.trust_fee_amount_cents)}</td>
+      </tr>`;
+
+    if (agg.trust_fee_cap_cents != null) {
+      lineItemsRows += `
+      <tr>
+        <td colspan="2" style="padding: 2px 0 6px 0; font-size: 12px; color: #9ca3af;">Capped at $${Math.round(agg.trust_fee_cap_cents / 100)}</td>
+      </tr>`;
+    }
+    if (agg.tax_amount_cents > 0) {
+      lineItemsRows += `
+      <tr>
+        <td style="padding: 6px 0; vertical-align: top; color: #6b7280; font-size: 13px;">Taxes</td>
+        <td style="padding: 6px 0; text-align: right; white-space: nowrap; color: #6b7280; font-size: 13px;">${formatCentsToDisplay(agg.tax_amount_cents)}</td>
+      </tr>`;
+    }
+    if (agg.tip_amount_cents > 0) {
+      lineItemsRows += `
+      <tr>
+        <td style="padding: 6px 0; vertical-align: top; color: #6b7280; font-size: 13px;">Tip</td>
+        <td style="padding: 6px 0; text-align: right; white-space: nowrap; color: #6b7280; font-size: 13px;">${formatCentsToDisplay(agg.tip_amount_cents)}</td>
+      </tr>`;
+    }
+
+    // Total row
+    lineItemsRows += `
+      <tr>
+        <td colspan="2" style="padding: 12px 0 0 0; border-top: 1px solid #e5e7eb;"></td>
+      </tr>
+      <tr>
+        <td style="padding: 4px 0; font-weight: 700; font-size: 16px;">Total</td>
+        <td style="padding: 4px 0; text-align: right; font-weight: 700; font-size: 16px;">${totalFormatted}</td>
+      </tr>`;
+  } else {
+    // Fallback: just show total if no line item breakdown
+    lineItemsRows = `
+      <tr>
+        <td style="padding: 6px 0; font-weight: 700;">Total charged</td>
+        <td style="padding: 6px 0; text-align: right; font-weight: 700;">${totalFormatted}</td>
+      </tr>`;
+  }
+
+  // --- Payment method row ---
+  let paymentMethodHtml = '';
+  if (pm && pm.last4) {
+    const brand = pm.brand.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    const capturedDate = pm.captured_at ? formatReceiptDate(pm.captured_at, timezone) : '';
+    paymentMethodHtml = `
+      <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+        <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 8px 0;">Payment</p>
+        <table width="100%" style="border-collapse: collapse;">
+          <tr>
+            <td style="padding: 4px 0; font-size: 14px;">${escapeHtml(brand)} ••••${escapeHtml(pm.last4)}</td>
+            <td style="padding: 4px 0; text-align: right; font-size: 13px; color: #6b7280;">${capturedDate ? escapeHtml(capturedDate) : ''}</td>
+          </tr>
+        </table>
+      </div>`;
+  }
+
+  // --- Service details ---
+  const serviceDetailRows = [];
+  if (completedAt) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Service date</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(completedAt)}</td></tr>`);
+  serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Service type</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(jobType)}</td></tr>`);
+  if (provider) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Provider</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(provider)}</td></tr>`);
+  if (pickupAddress) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Pickup</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(pickupAddress)}</td></tr>`);
+  if (dropoffAddress) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Dropoff</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(dropoffAddress)}</td></tr>`);
+
+  const serviceDetailsHtml = serviceDetailRows.length > 0 ? `
+    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+      <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 8px 0;">Service Details</p>
+      <table width="100%" style="border-collapse: collapse;">${serviceDetailRows.join('')}</table>
+    </div>` : '';
+
+  // --- Platform footer ---
+  const platformFooterHtml = `
+    <div style="margin-top: 4px; font-size: 11px; color: #9ca3af; line-height: 1.6;">
+      ${escapeHtml(platformLegalName)}${platformAddress ? ` · ${escapeHtml(platformAddress)}` : ''}${supportEmail ? ` · <a href="mailto:${escapeHtml(supportEmail)}" style="color:#9ca3af;">${escapeHtml(supportEmail)}</a>` : ''}
+    </div>`;
+
+  // --- Full body ---
+  const bodyContent = `
+    <div style="margin-bottom: 8px;">
+      <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 4px 0;">Receipt</p>
+      ${bookingNumber !== 'N/A' ? `<p style="font-size: 13px; color: #6b7280; margin: 0;">Booking No. ${escapeHtml(bookingNumber)}</p>` : ''}
+    </div>
+
+    <table width="100%" style="border-collapse: collapse; margin: 20px 0;">
+      ${lineItemsRows}
+    </table>
+
+    ${paymentMethodHtml}
+
+    ${serviceDetailsHtml}
+
+    <div style="margin: 24px 0;">
+      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
+    </div>
+    ${platformFooterHtml}
+  `;
+
+  // --- Plain text ---
+  const textParts = [
+    `Receipt — Booking No. ${bookingNumber}`,
+    '',
+  ];
+
+  if (agg) {
+    textParts.push(`${jobType}: ${formatCentsToDisplay(agg.booking_amount_cents)}`);
+    let trustFeeLabel = 'Service & Trust Fee';
+    if (agg.trust_fee_pct != null) trustFeeLabel += ` (${Math.round(agg.trust_fee_pct * 100)}%)`;
+    textParts.push(`${trustFeeLabel}: ${formatCentsToDisplay(agg.trust_fee_amount_cents)}`);
+    if (agg.trust_fee_cap_cents != null) textParts.push(`  Capped at $${Math.round(agg.trust_fee_cap_cents / 100)}`);
+    if (agg.tax_amount_cents > 0) textParts.push(`Taxes: ${formatCentsToDisplay(agg.tax_amount_cents)}`);
+    if (agg.tip_amount_cents > 0) textParts.push(`Tip: ${formatCentsToDisplay(agg.tip_amount_cents)}`);
+    textParts.push(`Total: ${totalFormatted}`);
+  } else {
+    textParts.push(`Total charged: ${totalFormatted}`);
+  }
+
+  textParts.push('');
+
+  if (pm && pm.last4) {
+    const brand = pm.brand.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    textParts.push(`Paid with: ${brand} ••••${pm.last4}`);
+    textParts.push('');
+  }
+
+  if (completedAt) textParts.push(`Service date: ${completedAt}`);
+  textParts.push(`Service type: ${jobType}`);
+  if (provider) textParts.push(`Provider: ${provider}`);
+  if (pickupAddress) textParts.push(`Pickup: ${pickupAddress}`);
+  if (dropoffAddress) textParts.push(`Dropoff: ${dropoffAddress}`);
+
+  textParts.push(
     '',
     `View booking: ${BASE_URL}/bookings`,
     '',
     '---',
-    'You received this because your booking was rescheduled.',
-    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
-    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    'You received this as a receipt for your completed service.',
+    `Manage preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${supportEmail}`,
     '',
-    `© ${new Date().getFullYear()} Haulwerk, LLC`
+    ...(createdAt ? [`Booked on ${createdAt}`] : []),
+    `© ${new Date().getFullYear()} ${platformLegalName}`
   );
 
   return {
     subject,
     html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
+ * Format cents as a dollar display string (e.g. 15099 → "$150.99")
+ */
+function formatCentsToDisplay(cents) {
+  if (cents == null) return '$0.00';
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Format an ISO date string to a human-readable receipt date
+ */
+function formatReceiptDate(isoString, timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: timezone || 'UTC',
+    }).format(new Date(isoString));
+  } catch {
+    return isoString;
+  }
+}
+
+/**
+ * Build payout sent email for SERVICE PROVIDER (OWNER/ADMIN)
+ */
+function buildPayoutSentEmail(data) {
+  const amountCents = data.amount_cents || 0;
+  const amountDollars = (amountCents / 100).toFixed(2);
+  const bookingNumber = data.booking_number || null;
+
+  const subject = 'Payout sent to your bank account';
+  const preheader = amountCents > 0
+    ? `$${amountDollars} is on its way to your bank.`
+    : 'A payout has been initiated to your bank account.';
+
+  const bodyContent = `
+    <h1>Payout sent</h1>
+    <p>A payout has been initiated and is on its way to your bank account.</p>
+
+    <div style="margin: 24px 0;">
+      ${amountCents > 0 ? `
+      <div class="detail-row" style="font-weight: 600;">
+        <span class="detail-label">Payout amount</span>
+        <span class="detail-value">$${escapeHtml(amountDollars)}</span>
+      </div>` : ''}
+      ${bookingNumber ? `
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>` : ''}
+      <div class="detail-row">
+        <span class="detail-label">Arrival</span>
+        <span class="detail-value">Typically 1-3 business days</span>
+      </div>
+    </div>
+
+    <p>Funds typically arrive within 1-3 business days depending on your bank.</p>
+
+    <div class="cta">
+      <a href="${DISPATCHER_BASE_URL}/dashboard/earnings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View earnings</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Payout sent to your bank account',
+    '',
+    'A payout has been initiated and is on its way to your bank account.',
+    '',
+    ...(amountCents > 0 ? [`Payout amount: $${amountDollars}`, ''] : []),
+    ...(bookingNumber ? [`Booking No.: ${bookingNumber}`, ''] : []),
+    'Arrival: Typically 1-3 business days',
+    '',
+    'Funds typically arrive within 1-3 business days depending on your bank.',
+    '',
+    `View earnings: ${DISPATCHER_BASE_URL}/dashboard/earnings`,
+    '',
+    '---',
+    'You received this because a payout was sent to your connected bank account.',
+    `Manage preferences: ${DISPATCHER_BASE_URL}/dashboard/profile/notifications`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildServiceProviderTemplate({ subject, preheader, bodyContent }),
     text: textParts.join('\n')
   };
 }
@@ -1550,20 +1814,25 @@ module.exports = {
   buildServiceProviderTemplate,
   buildConsumerTemplate,
   buildJobPostedEmail,
-  buildJobCanceledEmail,
   buildJobClosedEmail,
   buildInstantBookExpiredEmail,
-  buildBidCreatedEmail,
-  buildBidUpdatedEmail,
   buildBookingCreatedEmail,
+  buildBookingCreatedCustomerEmail,
   buildBookingAssignedCustomerEmail,
   buildBookingAssignedDriverEmail,
-  buildBookingInProgressEmail,
-  buildBookingInProgressDropoffEmail,
-  buildBookingRescheduledEmail,
+  buildBookingAssignedProviderEmail,
+  buildBookingCompletedProviderEmail,
+  buildBookingCompletedCustomerEmail,
+  buildBookingCanceledProviderEmail,
+  buildBookingCanceledCustomerEmail,
+  buildPaymentAuthorizationFailedEmail,
+  buildPaymentCapturedEmail,
+  buildPayoutSentEmail,
   normalizeJobType,
   formatTimingPreference,
   formatAddress,
+  formatCentsToDisplay,
+  formatReceiptDate,
   getPickupStop,
   getDropoffStop,
   escapeHtml,

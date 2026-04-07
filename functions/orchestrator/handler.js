@@ -244,6 +244,21 @@ async function constructNotificationContent(event) {
     
     case 'haul.booking.rescheduled':
       return constructBookingRescheduledNotification(event);
+
+    case 'haul.booking.completed':
+      return constructBookingCompletedNotification(event);
+
+    case 'haul.booking.canceled':
+      return constructBookingCanceledNotification(event);
+
+    case 'haul.payment.authorization_failed':
+      return constructPaymentAuthorizationFailedNotification(event);
+
+    case 'haul.payment.captured':
+      return constructPaymentCapturedNotification(event);
+
+    case 'haul.payout.sent':
+      return constructPayoutSentNotification(event);
     
     default:
       console.warn('[Orchestrator] No content constructor for event type', { event_type });
@@ -1018,6 +1033,89 @@ function constructBookingRescheduledNotification(event) {
     entity: {
       id: event.entity.id,
       type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.completed events
+ * Recipients: Customer AND service provider users
+ */
+function constructBookingCompletedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  return {
+    subject: `Booking ${bookingNumber} complete`,
+    body: `Your booking ${bookingNumber} has been completed.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.canceled events
+ * Recipients: Customer AND service provider users
+ */
+function constructBookingCanceledNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  return {
+    subject: `Booking ${bookingNumber} canceled`,
+    body: `Booking ${bookingNumber} has been canceled.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payment.authorization_failed events
+ * Recipients: Customer
+ */
+function constructPaymentAuthorizationFailedNotification(event) {
+  return {
+    subject: 'Payment authorization failed',
+    body: 'We were unable to authorize payment for your booking.',
+    entity: {
+      id: event.entity?.id || event.context?.booking_id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payment.captured events
+ * Recipients: Customer (receipt)
+ */
+function constructPaymentCapturedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  return {
+    subject: `Receipt for booking ${bookingNumber}`,
+    body: `Your payment for booking ${bookingNumber} has been processed.`,
+    entity: {
+      id: event.entity?.id || event.context?.booking_id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payout.sent events
+ * Recipients: Service provider (OWNER/ADMIN)
+ */
+function constructPayoutSentNotification(event) {
+  return {
+    subject: 'Payout sent',
+    body: 'A payout has been sent to your bank account.',
+    entity: {
+      id: event.entity?.id || event.context?.company_id,
+      type: 'company'
     },
     data: event.context || {}
   };

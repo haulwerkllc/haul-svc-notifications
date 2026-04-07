@@ -65,22 +65,39 @@ class BookingCreatedResolver extends NotificationResolver {
         company_id: booking.company_id
       });
 
-      // Step 3: Get service provider users using shared helper
-      const recipients = await resolveUsersByCompanyRole({
-        companyIds: booking.company_id,
-        eligibleRoles: ELIGIBLE_ROLES,
-        includeMetadata: false,
-        logPrefix: 'BookingCreatedResolver'
-      });
+      const recipientsWithMetadata = [];
 
-      // Step 4: Add recipient_type metadata
-      const recipientsWithMetadata = recipients.map(recipient => ({
-        user_id: recipient.user_id,
-        metadata: {
-          recipient_type: 'service_provider',
-          company_id: booking.company_id
+      if (event.context?.instant_book) {
+        // Instant book: customer accepted a price, company accepted it — only customer is notified
+        const customerUserId = event.context.customer_user_id || booking.customer_user_id;
+        if (customerUserId) {
+          recipientsWithMetadata.push({
+            user_id: customerUserId,
+            metadata: { recipient_type: 'customer' }
+          });
+          console.log('[BookingCreatedResolver] Instant book — notifying customer only', {
+            booking_id: bookingId,
+            customer_user_id: customerUserId
+          });
         }
-      }));
+      } else {
+        // Standard bid flow: customer accepted a company's bid — notify service provider
+        const providerUsers = await resolveUsersByCompanyRole({
+          companyIds: booking.company_id,
+          eligibleRoles: ELIGIBLE_ROLES,
+          includeMetadata: false,
+          logPrefix: 'BookingCreatedResolver'
+        });
+        for (const recipient of providerUsers) {
+          recipientsWithMetadata.push({
+            user_id: recipient.user_id,
+            metadata: {
+              recipient_type: 'service_provider',
+              company_id: booking.company_id
+            }
+          });
+        }
+      }
 
       console.log('[BookingCreatedResolver] Resolved recipients', {
         booking_id: bookingId,

@@ -347,36 +347,82 @@ The following will be the reserved namespaces:
 - `haul.company.*`
 - `haul.user.*`
 - `haul.payment.*`
+- `haul.payout.*`
+
+---
+
+## Full Notifications Matrix
+
+The table below is the canonical source of truth for which events trigger which notification channels.
+
+Legend: `✓` = active, `—` = not applicable, `(conditional)` = deferred, `(future)` = planned but not yet implemented
+
+| Service | Event | Recipient | Email | Push | SMS | Slack | Notes |
+|---------|-------|-----------|-------|------|-----|-------|-------|
+| Job | `haul.job.posted` | Company (providers in service area) | ✓ | ✓ | (future) | — | SMS only if user idle |
+| Job | `haul.job.canceled` | Company (providers with active bids) | — | ✓ | — | — | |
+| Job | `haul.job.closed` | Customer | ✓ | ✓ | — | — | |
+| Job | `haul.job.flagged_for_review` | Admin | (future) | — | — | (future) | Admin-only event |
+| Bid | `haul.bid.created` | Customer | — | ✓ | — | — | Batch email deferred (daily/hourly) |
+| Bid | `haul.bid.updated` | Customer | — | ✓ | — | — | |
+| Booking | `haul.booking.created` | Company | (conditional) | ✓ | — | — | If created via bid accepted |
+| Booking | `haul.booking.created` | Customer | (conditional) | ✓ | — | — | If created via Instant Book |
+| Booking | `haul.booking.assigned` | Customer | — | ✓ | — | — | |
+| Booking | `haul.booking.assigned` | Driver (Company) | ✓ | ✓ | ✓ | — | Email to driver once assigned |
+| Booking | `haul.booking.crew_en_route_pickup` | Customer | — | ✓ | ✓ | — | |
+| Booking | `haul.booking.in_progress_pickup` | Customer | — | ✓ | ✓ | — | |
+| Booking | `haul.booking.crew_en_route_dropoff` | Customer | — | ✓ | ✓ | — | |
+| Booking | `haul.booking.in_progress_dropoff` | Customer | — | ✓ | ✓ | — | |
+| Booking | `haul.booking.pending_confirmation` | Customer | — | ✓ | — | — | |
+| Booking | `haul.booking.pending_confirmation` | Company | — | ✓ | — | — | |
+| Booking | `haul.booking.completed` | Company | ✓ | ✓ | — | — | |
+| Booking | `haul.booking.completed` | Customer | ✓ | ✓ | — | — | |
+| Booking | `haul.booking.canceled` | Company | ✓ | ✓ | — | — | |
+| Booking | `haul.booking.canceled` | Customer | ✓ | ✓ | — | — | |
+| Payments | `haul.payment.authorization_failed` | Customer | ✓ | ✓ | — | — | |
+| Payments | `haul.payment.captured` | Customer | ✓ | — | — | — | Receipt / happy path |
+| Payouts | `haul.payout.sent` | Company | ✓ | ✓ | — | — | |
+
+---
 
 ## Bids
 
-- `haul.bid.created` → customer
-- `haul.bid.updated` → customer (only if materially changed)
+- `haul.bid.created` → customer (push only; batch email deferred)
+- `haul.bid.updated` → customer (push only)
 
 ## Booking
 
-`haul.booking.created` → provider
-`haul.booking.assigned` → customer
-`haul.booking.in_progress_pickup` → customer (push/SMS candidate)
-`haul.booking.pending_confirmation` → customer + crew
-`haul.booking.completed` → customer + provider
-`haul.booking.canceled` → both
+- `haul.booking.created` → provider (conditional: if created via bid accepted) / customer (conditional: if created via Instant Book)
+- `haul.booking.assigned` → customer (push only) + driver (email + push + SMS)
+- `haul.booking.crew_en_route_pickup` → customer (push + SMS)
+- `haul.booking.in_progress_pickup` → customer (push + SMS)
+- `haul.booking.crew_en_route_dropoff` → customer (push + SMS)
+- `haul.booking.in_progress_dropoff` → customer (push + SMS)
+- `haul.booking.pending_confirmation` → customer + company (push)
+- `haul.booking.completed` → customer + provider (email + push)
+- `haul.booking.canceled` → customer + company (email + push)
 
 ## Job
 
-- `haul.job.posted` → providers in service area
-- `haul.job.canceled` → providers with active bids
-- `haul.job.closed` → customer (bidding closed, select bid)
+- `haul.job.posted` → providers in service area (email + push; SMS future)
+- `haul.job.canceled` → providers with active bids (push only)
+- `haul.job.closed` → customer (email + push)
+- `haul.job.flagged_for_review` → admin only (email + Slack — deferred)
+
+## Payments
+
+- `haul.payment.authorization_failed` → customer (email + push)
+- `haul.payment.captured` → customer (email receipt — happy path)
+
+## Payouts
+
+- `haul.payout.sent` → company (email + push)
 
 ## Company
 
 [TBD]
 
 ## User
-
-[TBD]
-
-## Payments
 
 [TBD]
 

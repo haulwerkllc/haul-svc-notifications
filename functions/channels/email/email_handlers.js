@@ -3,16 +3,19 @@ const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
 const { 
   buildJobPostedEmail, 
-  buildJobCanceledEmail,
   buildJobClosedEmail,
-  buildBidCreatedEmail, 
-  buildBidUpdatedEmail,
   buildBookingCreatedEmail,
+  buildBookingCreatedCustomerEmail,
   buildBookingAssignedCustomerEmail,
   buildBookingAssignedDriverEmail,
-  buildBookingInProgressEmail,
-  buildBookingInProgressDropoffEmail,
-  buildBookingRescheduledEmail
+  buildBookingAssignedProviderEmail,
+  buildBookingCompletedProviderEmail,
+  buildBookingCompletedCustomerEmail,
+  buildBookingCanceledProviderEmail,
+  buildBookingCanceledCustomerEmail,
+  buildPaymentAuthorizationFailedEmail,
+  buildPaymentCapturedEmail,
+  buildPayoutSentEmail
 } = require('./templates');
 
 const sesClient = new SESv2Client({ region: process.env.REGION });
@@ -162,40 +165,45 @@ function renderEmailTemplate(eventType, data) {
     case 'haul.job.posted':
       return buildJobPostedEmail(data);
     
-    case 'haul.job.canceled':
-      return buildJobCanceledEmail(data);
-    
     case 'haul.job.closed':
       return buildJobClosedEmail(data);
     
-    case 'haul.bid.created':
-      return buildBidCreatedEmail(data);
-    
-    case 'haul.bid.updated':
-      return buildBidUpdatedEmail(data);
-    
     case 'haul.booking.created':
+      if (data.recipient_type === 'customer') {
+        return buildBookingCreatedCustomerEmail(data);
+      }
       return buildBookingCreatedEmail(data);
     
     case 'haul.booking.assigned':
-      // Route to appropriate template based on recipient type
-      if (data.recipient_type === 'customer') {
-        return buildBookingAssignedCustomerEmail(data);
+      if (data.recipient_type === 'provider') {
+        return buildBookingAssignedProviderEmail(data);
       } else if (data.recipient_type === 'driver') {
         return buildBookingAssignedDriverEmail(data);
       } else {
         console.error('[renderEmailTemplate] Unknown recipient_type for booking.assigned:', data.recipient_type, 'Available data keys:', Object.keys(data));
         return null;
       }
-    
-    case 'haul.booking.in_progress_pickup':
-      return buildBookingInProgressEmail(data);
-    
-    case 'haul.booking.in_progress_dropoff':
-      return buildBookingInProgressDropoffEmail(data);
-    
-    case 'haul.booking.rescheduled':
-      return buildBookingRescheduledEmail(data);
+
+    case 'haul.booking.completed':
+      if (data.recipient_type === 'provider') {
+        return buildBookingCompletedProviderEmail(data);
+      }
+      return buildBookingCompletedCustomerEmail(data);
+
+    case 'haul.booking.canceled':
+      if (data.recipient_type === 'provider') {
+        return buildBookingCanceledProviderEmail(data);
+      }
+      return buildBookingCanceledCustomerEmail(data);
+
+    case 'haul.payment.authorization_failed':
+      return buildPaymentAuthorizationFailedEmail(data);
+
+    case 'haul.payment.captured':
+      return buildPaymentCapturedEmail(data);
+
+    case 'haul.payout.sent':
+      return buildPayoutSentEmail(data);
     
     default:
       console.warn('[EmailChannel] No template for event type, using fallback', { event_type: eventType });

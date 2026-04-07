@@ -30,6 +30,7 @@ provider:
     COMPANY_TABLE_NAME: Company-${sls:stage}
     USER_TABLE_NAME: User-${sls:stage}
     COMPANY_ROLE_TABLE_NAME: CompanyRole-${sls:stage}
+    INVOICE_TABLE_NAME: Invoice-${sls:stage}
     SES_FROM_ADDRESS: ${self:custom.env.SES_FROM_ADDRESS}
     SES_SOURCE_ARN: ${self:custom.env.SES_SOURCE_ARN}
     SMS_ORIGINATION_IDENTITY_ARN: ${self:custom.env.SMS_ORIGINATION_IDENTITY_ARN, ''}
@@ -79,6 +80,13 @@ provider:
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/User-${sls:stage}/*
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/SmsSuppression-${sls:stage}
               - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/SmsSuppression-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Invoice-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Invoice-${sls:stage}/*
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/haul/platform/company_info
           - Effect: Allow
             Action:
               - es:ESHttpGet

@@ -1,6 +1,7 @@
 const NotificationResolver = require('./base');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const { resolveUsersByCompanyRole } = require('../../../utils/company-role-lookup');
 
 const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
@@ -13,24 +14,25 @@ const COMPANY_TABLE = process.env.COMPANY_TABLE_NAME;
 const USER_TABLE = process.env.USER_TABLE_NAME;
 const MEDIA_BASE_URL = process.env.MEDIA_BASE_URL;
 
+const ELIGIBLE_ROLES = ['OWNER', 'ADMIN', 'DISPATCHER'];
+
 /**
  * Resolver for haul.booking.assigned events
  * 
- * DELIVERY TARGETS: CUSTOMER + DRIVER
+ * DELIVERY TARGETS: SERVICE PROVIDER USERS + DRIVER
  * 
  * Recipients:
- * - Customer: The job owner (job.owner_user_id)
+ * - Service provider: OWNER/ADMIN/DISPATCHER users of booking.company_id
  * - Driver: The assigned driver (booking.driver_user_id)
  * 
  * BOUNDARY: This resolver performs LOOKUP ONLY
  * - Returns user_ids with explicit recipient_type metadata
- * - Do NOT query CompanyRole - driver_user_id is already on the booking
  * - MUST NOT evaluate preferences, determine channels, or perform delivery
  * 
  * Resolution:
  * 1. Get Booking by id
  * 2. Get Job by booking.job_id
- * 3. Return both customer (job.owner_user_id) and driver (booking.driver_user_id)
+ * 3. Get company users (OWNER/ADMIN/DISPATCHER) and driver
  */
 class BookingAssignedResolver extends NotificationResolver {
   getEventType() {
@@ -105,19 +107,24 @@ class BookingAssignedResolver extends NotificationResolver {
       // Step 6: Build recipients list
       const recipients = [];
 
-      // Add customer (job owner)
-      if (job.owner_user_id) {
-        recipients.push({
-          user_id: job.owner_user_id,
-          metadata: {
-            recipient_type: 'customer'
-          }
+      // Add service provider users (OWNER/ADMIN/DISPATCHER), excluding the driver
+      // to prevent them receiving two emails if they hold a company role
+      if (booking.company_id) {
+        const providerUsers = await resolveUsersByCompanyRole({
+          companyIds: booking.company_id,
+          eligibleRoles: ELIGIBLE_ROLES,
+          includeMetadata: false,
+          logPrefix: 'BookingAssignedResolver'
         });
+        for (const u of providerUsers) {
+          if (u.user_id === booking.driver_user_id) continue;
+          recipients.push({
+            user_id: u.user_id,
+            metadata: { recipient_type: 'provider', company_id: booking.company_id }
+          });
+        }
       } else {
-        console.warn('[BookingAssignedResolver] Job has no owner_user_id', { 
-          booking_id: bookingId,
-          job_id: booking.job_id 
-        });
+        console.warn('[BookingAssignedResolver] Booking has no company_id', { booking_id: bookingId });
       }
 
       // Add driver
@@ -137,7 +144,6 @@ class BookingAssignedResolver extends NotificationResolver {
       console.log('[BookingAssignedResolver] Resolved recipients', {
         booking_id: bookingId,
         recipient_count: recipients.length,
-        has_customer: !!job.owner_user_id,
         has_driver: !!booking.driver_user_id
       });
 
