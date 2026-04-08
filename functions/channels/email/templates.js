@@ -418,7 +418,9 @@ function buildJobPostedEmail(jobData) {
     jobData.preferred_pickup_window_end
   );
   const pickupStop = getPickupStop(jobData.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(jobData.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
   const timezone = pickupStop?.timezone || jobData.pickup_timezone;
   const biddingClosesAt = jobData.bidding_closes_at ? formatBiddingDeadline(jobData.bidding_closes_at, timezone) : null;
   
@@ -431,9 +433,13 @@ function buildJobPostedEmail(jobData) {
     
     <div style="margin: 24px 0;">
       <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
       <div class="detail-row">
         <span class="detail-label">Timing</span>
         <span class="detail-value">${escapeHtml(timing)}</span>
@@ -455,7 +461,8 @@ function buildJobPostedEmail(jobData) {
     '',
     `A ${jobType} job is ready for booking in your service area.`,
     '',
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     `Timing: ${timing}`
   ];
   
@@ -504,8 +511,17 @@ function buildJobClosedEmail(data) {
   const jobId = data.job_id;
   const scenario = data.scenario || (bidCount > 0 ? 'A' : 'B');
 
-  if (scenario === 'INSTANT_BOOK_EXPIRED') {
+  if (scenario === 'INSTANT_BOOK_EXPIRED' || scenario === 'INSTANT_BOOK_NO_BIDS') {
     return buildInstantBookExpiredEmail({ jobType, location, jobId });
+  }
+  if (scenario === 'EXPIRED_NO_SELECTION') {
+    return buildJobExpiredNoSelectionEmail({ jobType, location, jobId });
+  }
+  if (scenario === 'OPEN_FOR_BIDS_NO_BIDS') {
+    return buildJobClosedNoQuotesEmail({ jobType, location, jobId });
+  }
+  if (scenario === 'INSTANT_BOOK_WITH_BIDS' || scenario === 'OPEN_FOR_BIDS_WITH_BIDS') {
+    return buildJobClosedWithQuotesEmail({ jobType, location, bidCount, jobId });
   }
   if (scenario === 'A') {
     return buildJobClosedWithQuotesEmail({ jobType, location, bidCount, jobId });
@@ -690,6 +706,60 @@ function buildInstantBookExpiredEmail({ jobType, location, jobId }) {
 }
 
 /**
+ * Scenario: Grace period elapsed, no bid selected
+ * Fired by expire-unselected-bids after the 24-hour selection window closes
+ */
+function buildJobExpiredNoSelectionEmail({ jobType, location, jobId }) {
+  const subject = 'Your job has closed';
+  const preheader = 'The selection window ended without a bid being selected';
+
+  const bodyContent = `
+    <h1>Your job has closed</h1>
+    <p>The selection window for your ${escapeHtml(jobType)} job ended and no bid was selected.</p>
+
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Location</span>
+        <span class="detail-value">${escapeHtml(location)}</span>
+      </div>
+    </div>
+
+    <p>If you still need the service, you can repost the job to receive new bids.</p>
+
+    <div class="cta">
+      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View job</a>
+    </div>
+  `;
+
+  const textParts = [
+    'Your job has closed',
+    '',
+    `The selection window for your ${jobType} job ended and no bid was selected.`,
+    '',
+    `Location: ${location}`,
+    '',
+    'If you still need the service, you can repost the job to receive new bids.',
+    '',
+    `View job: ${BASE_URL}/jobs/${jobId}`,
+    '',
+    '---',
+    'You received this because you posted a job on Haul.',
+    `Update preferences: ${BASE_URL}/user/preferences`,
+    `Contact support: ${SUPPORT_EMAIL}`
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({
+      subject,
+      preheader,
+      bodyContent
+    }),
+    text: textParts.join('\n')
+  };
+}
+
+/**
  * Build booking created email for service providers
  * Notifies OWNER/ADMIN/DISPATCHER that their bid was accepted
  */
@@ -700,7 +770,9 @@ function buildBookingCreatedEmail(data) {
   const amountCents = data.amount_cents || 0;
   const amountDollars = (amountCents / 100).toFixed(2);
   const pickupStop = getPickupStop(data.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
   const companyName = data.company_name || 'your company';
   const logoUrl = data.logo_url;
   
@@ -737,9 +809,13 @@ function buildBookingCreatedEmail(data) {
         <span class=\"detail-value\">$${escapeHtml(amountDollars)}</span>
       </div>
       <div class=\"detail-row\">
-        <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}</span>
+        <span class=\"detail-label\">Pickup</span>
+        <span class=\"detail-value\">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class=\"detail-row\">
+        <span class=\"detail-label\">Dropoff</span>
+        <span class=\"detail-value\">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
     </div>
     
     <p>So, what's next? Prepare for ${escapeHtml(jobTypeDisplay)} service and assign a crew to get this booking started.</p>
@@ -756,7 +832,8 @@ function buildBookingCreatedEmail(data) {
     '',
     `Booking No.: ${bookingNumber}`,
     `Amount: $${amountDollars}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     '',
     `So, what's next? Prepare for ${jobTypeDisplay} service and assign a crew to get this booking started.`,
     '',
@@ -789,7 +866,9 @@ function buildBookingAssignedCustomerEmail(data) {
   
   const bookingNumber = data.booking_number || 'N/A';
   const pickupStop = getPickupStop(data.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
   const companyName = data.company_name || 'the service provider';
   const driverName = data.driver_given_name || 'your crew leader';
   const logoUrl = data.logo_url;
@@ -826,9 +905,13 @@ function buildBookingAssignedCustomerEmail(data) {
         <span class=\"detail-value\">${escapeHtml(bookingNumber)}</span>
       </div>
       <div class=\"detail-row\">
-        <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}</span>
+        <span class=\"detail-label\">Pickup</span>
+        <span class=\"detail-value\">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class=\"detail-row\">
+        <span class=\"detail-label\">Dropoff</span>
+        <span class=\"detail-value\">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
       <div class=\"detail-row\">
         <span class=\"detail-label\">Pickup window</span>
         <span class=\"detail-value\">${escapeHtml(pickupWindow)}</span>
@@ -850,7 +933,8 @@ function buildBookingAssignedCustomerEmail(data) {
     `Crew leader: ${driverName}`,
     `Company: ${companyName}`,
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     `Pickup window: ${pickupWindow}`,
     '',
     'Your crew has been assigned and will contact you to coordinate service.',
@@ -881,7 +965,9 @@ function buildBookingAssignedDriverEmail(data) {
   
   const bookingNumber = data.booking_number || 'N/A';
   const driverPickupStop = getPickupStop(data.stops);
-  const location = formatAddress(driverPickupStop);
+  const driverDropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(driverPickupStop);
+  const dropoffAddress = driverDropoffStop ? formatAddress(driverDropoffStop) : null;
   const companyName = data.company_name || 'your company';
   const logoUrl = data.logo_url;
   const timezone = driverPickupStop?.timezone || data.pickup_timezone;
@@ -911,9 +997,13 @@ function buildBookingAssignedDriverEmail(data) {
         <span class=\"detail-value\">${escapeHtml(bookingNumber)}</span>
       </div>
       <div class=\"detail-row\">
-        <span class=\"detail-label\">Location</span>
-        <span class=\"detail-value\">${escapeHtml(location)}</span>
+        <span class=\"detail-label\">Pickup</span>
+        <span class=\"detail-value\">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class=\"detail-row\">
+        <span class=\"detail-label\">Dropoff</span>
+        <span class=\"detail-value\">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
       <div class=\"detail-row\">
         <span class=\"detail-label\">Pickup window</span>
         <span class=\"detail-value\">${escapeHtml(pickupWindow)}</span>
@@ -933,7 +1023,8 @@ function buildBookingAssignedDriverEmail(data) {
     "You've been assigned to handle this booking.",
     '',
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     `Pickup window: ${pickupWindow}`,
     '',
     'Review the job details and coordinate with the customer to complete the service.',
@@ -966,7 +1057,9 @@ function buildBookingCreatedCustomerEmail(data) {
   const amountCents = data.amount_cents || 0;
   const amountDollars = (amountCents / 100).toFixed(2);
   const pickupStop = getPickupStop(data.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
   const companyName = data.company_name || 'a service provider';
   const logoUrl = data.logo_url;
 
@@ -991,9 +1084,13 @@ function buildBookingCreatedCustomerEmail(data) {
         <span class="detail-value">$${escapeHtml(amountDollars)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
     </div>
     <p>You'll receive updates as your crew is assigned and your service day approaches.</p>
     <div class="cta">
@@ -1009,7 +1106,8 @@ function buildBookingCreatedCustomerEmail(data) {
     `Booking No.: ${bookingNumber}`,
     `Provider: ${companyName}`,
     `Amount: $${amountDollars}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     '',
     "You'll receive updates as your crew is assigned and your service day approaches.",
     '',
@@ -1039,7 +1137,9 @@ function buildBookingAssignedProviderEmail(data) {
 
   const bookingNumber = data.booking_number || 'N/A';
   const driverPickupStop = getPickupStop(data.stops);
-  const location = formatAddress(driverPickupStop);
+  const driverDropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(driverPickupStop);
+  const dropoffAddress = driverDropoffStop ? formatAddress(driverDropoffStop) : null;
   const companyName = data.company_name || 'your company';
   const driverName = data.driver_given_name || 'A crew member';
   const logoUrl = data.logo_url;
@@ -1073,9 +1173,13 @@ function buildBookingAssignedProviderEmail(data) {
         <span class="detail-value">${escapeHtml(bookingNumber)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
       <div class="detail-row">
         <span class="detail-label">Pickup window</span>
         <span class="detail-value">${escapeHtml(pickupWindow)}</span>
@@ -1093,7 +1197,8 @@ function buildBookingAssignedProviderEmail(data) {
     '',
     `Driver: ${driverName}`,
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     `Pickup window: ${pickupWindow}`,
     '',
     `View booking: ${DISPATCHER_BASE_URL}/dashboard/jobs/booked/${bookingNumber}`,
@@ -1121,7 +1226,9 @@ function buildBookingCompletedProviderEmail(data) {
   const amountCents = data.amount_cents || 0;
   const amountDollars = (amountCents / 100).toFixed(2);
   const pickupStop = getPickupStop(data.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
   const timezone = pickupStop?.timezone || data.pickup_timezone;
   const completedAt = data.completed_at
     ? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone || 'UTC' }).format(new Date(data.completed_at))
@@ -1140,9 +1247,13 @@ function buildBookingCompletedProviderEmail(data) {
         <span class="detail-value">${escapeHtml(bookingNumber)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
       <div class="detail-row">
         <span class="detail-label">Amount</span>
         <span class="detail-value">$${escapeHtml(amountDollars)}</span>
@@ -1166,7 +1277,8 @@ function buildBookingCompletedProviderEmail(data) {
     `Booking ${bookingNumber} has been completed.`,
     '',
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     `Amount: $${amountDollars}`,
     `Completed: ${completedAt}`,
     '',
@@ -1198,7 +1310,9 @@ function buildBookingCompletedCustomerEmail(data) {
   const amountCents = data.amount_cents || 0;
   const amountDollars = (amountCents / 100).toFixed(2);
   const pickupStop = getPickupStop(data.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
   const timezone = pickupStop?.timezone || data.pickup_timezone;
   const completedAt = data.completed_at
     ? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone || 'UTC' }).format(new Date(data.completed_at))
@@ -1221,9 +1335,13 @@ function buildBookingCompletedCustomerEmail(data) {
         <span class="detail-value">${escapeHtml(companyName)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
       <div class="detail-row">
         <span class="detail-label">Completed</span>
         <span class="detail-value">${escapeHtml(completedAt)}</span>
@@ -1248,7 +1366,8 @@ function buildBookingCompletedCustomerEmail(data) {
     '',
     `Booking No.: ${bookingNumber}`,
     `Company: ${companyName}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     `Completed: ${completedAt}`,
     `Amount charged: $${amountDollars}`,
     '',
@@ -1277,7 +1396,9 @@ function buildBookingCompletedCustomerEmail(data) {
 function buildBookingCanceledProviderEmail(data) {
   const bookingNumber = data.booking_number || 'N/A';
   const pickupStop = getPickupStop(data.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
 
   const subject = `Booking ${bookingNumber} canceled`;
   const preheader = `Booking ${bookingNumber} has been canceled.`;
@@ -1292,9 +1413,13 @@ function buildBookingCanceledProviderEmail(data) {
         <span class="detail-value">${escapeHtml(bookingNumber)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
     </div>
 
     <p>No further action is required for this booking.</p>
@@ -1310,7 +1435,8 @@ function buildBookingCanceledProviderEmail(data) {
     `Booking ${bookingNumber} has been canceled.`,
     '',
     `Booking No.: ${bookingNumber}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     '',
     'No further action is required for this booking.',
     '',
@@ -1338,7 +1464,9 @@ function buildBookingCanceledCustomerEmail(data) {
   const bookingNumber = data.booking_number || 'N/A';
   const companyName = data.company_name || 'your service provider';
   const pickupStop = getPickupStop(data.stops);
-  const location = formatAddress(pickupStop);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
 
   const subject = `Booking ${bookingNumber} canceled`;
   const preheader = `Your booking with ${companyName} has been canceled.`;
@@ -1357,9 +1485,13 @@ function buildBookingCanceledCustomerEmail(data) {
         <span class="detail-value">${escapeHtml(companyName)}</span>
       </div>
       <div class="detail-row">
-        <span class="detail-label">Location</span>
-        <span class="detail-value">${escapeHtml(location)}</span>
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
       </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
     </div>
 
     <p>If a charge was made, any applicable refund will be processed within 5-10 business days. Contact us if you have questions.</p>
@@ -1376,7 +1508,8 @@ function buildBookingCanceledCustomerEmail(data) {
     '',
     `Booking No.: ${bookingNumber}`,
     `Company: ${companyName}`,
-    `Location: ${location}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
     '',
     'If a charge was made, any applicable refund will be processed within 5-10 business days. Contact us if you have questions.',
     '',
@@ -1816,6 +1949,7 @@ module.exports = {
   buildJobPostedEmail,
   buildJobClosedEmail,
   buildInstantBookExpiredEmail,
+  buildJobExpiredNoSelectionEmail,
   buildBookingCreatedEmail,
   buildBookingCreatedCustomerEmail,
   buildBookingAssignedCustomerEmail,

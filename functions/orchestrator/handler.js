@@ -222,7 +222,7 @@ async function constructNotificationContent(event) {
       return await constructJobCanceledNotification(entity.id);
     
     case 'haul.job.closed':
-      return await constructJobClosedNotification(entity.id);
+      return await constructJobClosedNotification(entity.id, event);
     
     case 'haul.bid.created':
       return await constructBidCreatedNotification(entity.id);
@@ -801,12 +801,15 @@ function formatJobTypeForServiceProvider(jobType) {
 /**
  * Construct notification content for haul.job.closed events
  * Recipients: Consumer who posted the job
- * 
- * Scenarios:
- * A: Bidding closed, one or more OPEN bids exist
- * B: Bidding closed, no bids exist
+ *
+ * Scenarios (set by emitter in event.context.scenario):
+ *   OPEN_FOR_BIDS_WITH_BIDS    — bidding closed, bids exist → BID_SELECTION_PENDING
+ *   OPEN_FOR_BIDS_NO_BIDS      — bidding closed, no bids    → EXPIRED
+ *   INSTANT_BOOK_WITH_BIDS     — instant book closed, bids exist → BID_SELECTION_PENDING
+ *   INSTANT_BOOK_NO_BIDS       — instant book closed, no bids   → EXPIRED
+ *   EXPIRED_NO_SELECTION       — grace period elapsed, no bid selected (expire-unselected-bids)
  */
-async function constructJobClosedNotification(jobId) {
+async function constructJobClosedNotification(jobId, event) {
   const job = await loadJobData(jobId);
 
   if (!job) {
@@ -817,13 +820,105 @@ async function constructJobClosedNotification(jobId) {
     };
   }
 
-  const jobType = formatJobTypeForConsumer(job.job_type);
+  const scenario  = event.context?.scenario;
+  const bidCount  = event.context?.bid_count ?? null;
+  const jobType   = formatJobTypeForConsumer(job.job_type);
   const pickupStop = getPickupStop(job);
-  const pickupAddress = pickupStop
-    ? formatStopAddress(pickupStop)
-    : 'Your job location';
+  const pickupAddress = pickupStop ? formatStopAddress(pickupStop) : 'Your job location';
 
-  // Instant book: acceptance window elapsed with no provider accepting the price
+  const baseData = {
+    job_id: jobId,
+    job_type: job.job_type,
+    job_type_formatted: jobType,
+    stops: job.stops,
+    location_formatted: pickupAddress,
+  };
+
+  console.log('[Orchestrator] constructJobClosedNotification', { job_id: jobId, scenario, bidCount });
+
+  // Grace period elapsed, no bid selected (fired by expire-unselected-bids)
+  if (scenario === 'EXPIRED_NO_SELECTION') {
+    return {
+      subject: 'Your job has closed',
+      body: [
+        `The selection window for your ${jobType} job has ended and no bid was selected.`,
+        '',
+        `Location: ${pickupAddress}`,
+        '',
+        'You can repost the job if you still need the service.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, scenario: 'EXPIRED_NO_SELECTION' }
+    };
+  }
+
+  // Instant book window closed — no providers accepted the price
+  if (scenario === 'INSTANT_BOOK_NO_BIDS') {
+    return {
+      subject: 'Your instant book price was not accepted',
+      body: [
+        `Your instant book price for your ${jobType} job was not accepted by any service providers within the 48-hour window.`,
+        '',
+        `Location: ${pickupAddress}`,
+        '',
+        'You can repost the job to receive competitive bids, or try a different instant book price.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, scenario: 'INSTANT_BOOK_NO_BIDS' }
+    };
+  }
+
+  // Instant book window closed — providers submitted bids instead of accepting the price
+  if (scenario === 'INSTANT_BOOK_WITH_BIDS') {
+    const quoteText = bidCount === 1 ? '1 quote' : `${bidCount ?? 'some'} quotes`;
+    return {
+      subject: `You have ${quoteText} to review`,
+      body: [
+        `Your instant book window for your ${jobType} job has ended, but providers submitted ${quoteText}.`,
+        '',
+        `Review and select a quote to book your service.`,
+        '',
+        `Location: ${pickupAddress}`
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, bid_count: bidCount, scenario: 'INSTANT_BOOK_WITH_BIDS' }
+    };
+  }
+
+  // Bidding closed — bids exist
+  if (scenario === 'OPEN_FOR_BIDS_WITH_BIDS') {
+    const quoteText = bidCount === 1 ? '1 quote' : `${bidCount ?? 'some'} quotes`;
+    return {
+      subject: `You have ${quoteText} to review`,
+      body: [
+        `The bidding period for your ${jobType} job has ended.`,
+        '',
+        `You received ${quoteText}. Review and select a quote to book your service.`,
+        '',
+        `Location: ${pickupAddress}`
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, bid_count: bidCount, scenario: 'OPEN_FOR_BIDS_WITH_BIDS' }
+    };
+  }
+
+  // Bidding closed — no bids received
+  if (scenario === 'OPEN_FOR_BIDS_NO_BIDS') {
+    return {
+      subject: 'Your job did not receive any quotes',
+      body: [
+        `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
+        '',
+        `Location: ${pickupAddress}`,
+        '',
+        'This can happen when providers in your area are at capacity. You can repost your job to try again.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, bid_count: 0, scenario: 'OPEN_FOR_BIDS_NO_BIDS' }
+    };
+  }
+
+  // Legacy fallback: no scenario in event — infer from job state + live bid query
   if (job.instant_book === true) {
     return {
       subject: 'Your instant book price was not accepted',
@@ -835,29 +930,20 @@ async function constructJobClosedNotification(jobId) {
         'You can repost the job to receive competitive bids, or try a different instant book price.'
       ].join('\n'),
       entity: { id: jobId, type: 'job' },
-      data: {
-        job_id: jobId,
-        job_type: job.job_type,
-        job_type_formatted: jobType,
-        stops: job.stops,
-        location_formatted: pickupAddress,
-        scenario: 'INSTANT_BOOK_EXPIRED'
-      }
+      data: { ...baseData, scenario: 'INSTANT_BOOK_NO_BIDS' }
     };
   }
 
-  // Standard bids flow — Query open bids for this job
   const openBids = await queryOpenBidsForJob(jobId);
-  const bidCount = openBids.length;
+  const liveBidCount = openBids.length;
 
-  console.log('[Orchestrator] Job closed scenario', {
+  console.log('[Orchestrator] Job closed legacy fallback', {
     job_id: jobId,
-    bid_count: bidCount,
-    scenario: bidCount > 0 ? 'A' : 'B',
+    bid_count: liveBidCount,
   });
 
-  if (bidCount > 0) {
-    const quoteText = bidCount === 1 ? '1 quote' : `${bidCount} quotes`;
+  if (liveBidCount > 0) {
+    const quoteText = liveBidCount === 1 ? '1 quote' : `${liveBidCount} quotes`;
     return {
       subject: `You have ${quoteText} to review`,
       body: [
@@ -868,38 +954,22 @@ async function constructJobClosedNotification(jobId) {
         `Location: ${pickupAddress}`
       ].join('\n'),
       entity: { id: jobId, type: 'job' },
-      data: {
-        job_id: jobId,
-        job_type: job.job_type,
-        job_type_formatted: jobType,
-        stops: job.stops,
-        location_formatted: pickupAddress,
-        bid_count: bidCount,
-        scenario: 'A'
-      }
-    };
-  } else {
-    return {
-      subject: 'Your job did not receive any quotes',
-      body: [
-        `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
-        '',
-        `Location: ${pickupAddress}`,
-        '',
-        'This can happen when providers in your area are at capacity. You can repost your job to try again.'
-      ].join('\n'),
-      entity: { id: jobId, type: 'job' },
-      data: {
-        job_id: jobId,
-        job_type: job.job_type,
-        job_type_formatted: jobType,
-        stops: job.stops,
-        location_formatted: pickupAddress,
-        bid_count: 0,
-        scenario: 'B'
-      }
+      data: { ...baseData, bid_count: liveBidCount, scenario: 'OPEN_FOR_BIDS_WITH_BIDS' }
     };
   }
+
+  return {
+    subject: 'Your job did not receive any quotes',
+    body: [
+      `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
+      '',
+      `Location: ${pickupAddress}`,
+      '',
+      'This can happen when providers in your area are at capacity. You can repost your job to try again.'
+    ].join('\n'),
+    entity: { id: jobId, type: 'job' },
+    data: { ...baseData, bid_count: 0, scenario: 'OPEN_FOR_BIDS_NO_BIDS' }
+  };
 }
 
 /**
@@ -1178,8 +1248,9 @@ async function loadNotificationPreferences(userId) {
 function determineEnabledChannels(eventType, preferences) {
   const channels = [];
 
-  // Email: enabled by default unless explicitly disabled
-  if (preferences.channels?.email !== false) {
+  // Email: enabled by default unless explicitly disabled or suppressed for this event type
+  const emailSuppressedEvents = ['haul.booking.assigned'];
+  if (preferences.channels?.email !== false && !emailSuppressedEvents.includes(eventType)) {
     channels.push('email');
   }
 
