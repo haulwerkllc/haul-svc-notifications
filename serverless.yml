@@ -55,6 +55,7 @@ provider:
               - sms-voice:SendTextMessage
               - messaging:SendMessage
               - sqs:SendMessage
+              - mobiletargeting:SendMessages
             Resource: "*"
           - Effect: Allow
             Action:

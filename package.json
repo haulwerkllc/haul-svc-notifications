@@ -17,6 +17,7 @@
     "@aws-crypto/sha256-js": "^5.2.0",
     "@aws-sdk/client-dynamodb": "^3.948.0",
     "@aws-sdk/client-eventbridge": "^3.948.0",
+    "@aws-sdk/client-pinpoint": "^3.1027.0",
     "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.962.0",
     "@aws-sdk/client-sesv2": "^3.962.0",
     "@aws-sdk/client-sqs": "^3.948.0",

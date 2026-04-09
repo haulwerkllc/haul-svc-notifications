@@ -303,11 +303,11 @@ async function constructJobPostedNotification(jobId) {
   const pickupTimezone = pickupStop?.timezone || null;
 
   // Build subject line
-  const subject = 'New job available in your service area';
+  const subject = 'New job near you';
 
   // Build notification body with available details
   const bodyParts = [
-    `A new ${jobType} job has been posted near you.`,
+    `A new ${jobType.toLowerCase().replace(/_/g, ' ')} job has been posted near you.`,
     '',
     `Location: ${pickupAddress}`,
     `Timing: ${timingPreference}`
