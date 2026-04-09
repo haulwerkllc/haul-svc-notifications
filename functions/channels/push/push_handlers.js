@@ -144,16 +144,28 @@ async function sendToDevice(device, { subject, body, event_type, entity_type, en
           [token]: { ChannelType: channelType }
         },
         MessageConfiguration: {
+          // RawContent is required for APNs so custom data reaches the app.
+          // expo-notifications reads userInfo["body"] for remote notifications
+          // (see EXNotificationSerializer.m serializedNotificationData), so all
+          // custom fields must be nested under the "body" key.
           APNSMessage: {
-            Action: 'OPEN_APP',
-            Title: subject,
-            Body: pushBody,
-            Data: data
+            RawContent: JSON.stringify({
+              aps: {
+                alert: { title: subject, body: pushBody },
+                sound: 'default',
+              },
+              body: {
+                event_type: data.event_type,
+                entity_type: data.entity_type,
+                entity_id: data.entity_id,
+              },
+            }),
           },
           GCMMessage: {
             Action: 'OPEN_APP',
             Title: subject,
             Body: pushBody,
+            Sound: 'default',
             Data: data
           }
         }
