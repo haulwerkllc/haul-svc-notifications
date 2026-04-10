@@ -70,6 +70,9 @@ async function sendPushNotification(message) {
   } = message;
 
   const bookingNumber = message.context?.booking_number || '';
+  const senderProfilePhotoUrl = event_type === 'haul.message.created'
+    ? (message.data?.sender_profile_photo_url || null)
+    : null;
 
   if (!PINPOINT_APP_ID || !PINPOINT_DRIVER_APP_ID) {
     console.error('[PushChannel] PINPOINT_APP_ID or PINPOINT_DRIVER_APP_ID not configured');
@@ -93,7 +96,7 @@ async function sendPushNotification(message) {
 
   let anySuccess = false;
   for (const device of devices) {
-    const sent = await sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number: bookingNumber });
+    const sent = await sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number: bookingNumber, sender_profile_photo_url: senderProfilePhotoUrl });
     if (sent) anySuccess = true;
   }
 
@@ -146,7 +149,7 @@ async function resolveUserDevices(userId) {
   }
 }
 
-async function sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number }) {
+async function sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number, sender_profile_photo_url }) {
   const { device_id, token, platform, user_id, env: deviceEnv, app: deviceApp } = device;
   const channelType = platform !== 'ios'
     ? 'GCM'
@@ -183,12 +186,16 @@ async function sendToDevice(device, { subject, body, event_type, entity_type, en
               aps: {
                 alert: { title: subject, body: pushBody },
                 sound: 'default',
+                // mutable-content instructs iOS to invoke the Notification
+                // Service Extension before displaying the notification.
+                ...(event_type === 'haul.message.created' && { 'mutable-content': 1 }),
               },
               body: {
                 event_type: data.event_type,
                 entity_type: data.entity_type,
                 entity_id: data.entity_id,
                 booking_number: data.booking_number,
+                ...(sender_profile_photo_url && { sender_profile_photo_url }),
               },
             }),
           },
