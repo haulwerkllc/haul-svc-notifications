@@ -24,6 +24,7 @@ const VALID_EVENT_TYPES = [
   'haul.payment.authorization_failed',
   'haul.payment.captured',
   'haul.payout.sent',
+  'haul.message.created',
 ];
 
 /**

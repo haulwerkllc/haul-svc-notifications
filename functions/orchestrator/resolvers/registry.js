@@ -20,6 +20,7 @@ const BookingCanceledResolver = require('./booking_canceled_resolver');
 const PaymentAuthorizationFailedResolver = require('./payment_authorization_failed_resolver');
 const PaymentCapturedResolver = require('./payment_captured_resolver');
 const PayoutSentResolver = require('./payout_sent_resolver');
+const MessageCreatedResolver = require('./message_created_resolver');
 
 // Initialize resolver instances
 const resolvers = [
@@ -37,7 +38,8 @@ const resolvers = [
   new BookingCanceledResolver(),
   new PaymentAuthorizationFailedResolver(),
   new PaymentCapturedResolver(),
-  new PayoutSentResolver()
+  new PayoutSentResolver(),
+  new MessageCreatedResolver()
 ];
 
 // Build registry keyed by event_type

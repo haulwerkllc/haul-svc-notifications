@@ -259,6 +259,9 @@ async function constructNotificationContent(event) {
 
     case 'haul.payout.sent':
       return constructPayoutSentNotification(event);
+
+    case 'haul.message.created':
+      return constructMessageCreatedNotification(event);
     
     default:
       console.warn('[Orchestrator] No content constructor for event type', { event_type });
@@ -1191,6 +1194,47 @@ function constructPayoutSentNotification(event) {
   };
 }
 
+const SENDER_TYPE_ROLE = {
+  customer: 'Customer',
+  driver: 'Driver',
+  company_user: 'Dispatcher',
+};
+
+/**
+ * Construct notification content for haul.message.created events
+ * Push/SMS only — email is suppressed for this event type.
+ *
+ * Subject: "{given_name}" (always shown on lock screen)
+ * Body: message preview (iOS hides on locked screen per user's Show Previews setting)
+ */
+function constructMessageCreatedNotification(event) {
+  const ctx = event.context || {};
+  const senderType = ctx.sender_type || 'customer';
+  const role = SENDER_TYPE_ROLE[senderType] || senderType;
+  const givenName = ctx.sender_given_name || role;
+  const subject = givenName;
+  const body = ctx.message_preview || 'New message';
+
+  const profilePhotoUrl = ctx.sender_profile_photo_key
+    ? `${MEDIA_BASE_URL}/${ctx.sender_profile_photo_key}`
+    : null;
+
+  return {
+    subject,
+    body,
+    entity: {
+      id: event.entity.id,
+      type: 'thread',
+    },
+    data: {
+      thread_id: ctx.thread_id,
+      booking_id: ctx.booking_id,
+      booking_number: ctx.booking_number || '',
+      sender_profile_photo_url: profilePhotoUrl,
+    },
+  };
+}
+
 /**
  * Load notification preferences for a user
  * Returns default preferences if none exist
@@ -1249,7 +1293,7 @@ function determineEnabledChannels(eventType, preferences) {
   const channels = [];
 
   // Email: enabled by default unless explicitly disabled or suppressed for this event type
-  const emailSuppressedEvents = ['haul.booking.assigned'];
+  const emailSuppressedEvents = ['haul.booking.assigned', 'haul.message.created'];
   if (preferences.channels?.email !== false && !emailSuppressedEvents.includes(eventType)) {
     channels.push('email');
   }

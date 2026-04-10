@@ -69,23 +69,31 @@ async function sendPushNotification(message) {
     body
   } = message;
 
+  const bookingNumber = message.context?.booking_number || '';
+
   if (!PINPOINT_APP_ID || !PINPOINT_DRIVER_APP_ID) {
     console.error('[PushChannel] PINPOINT_APP_ID or PINPOINT_DRIVER_APP_ID not configured');
     await updateDeliveryStatus(user_id, notification_id, notification_timestamp, 'failed', 'Pinpoint not configured');
     return;
   }
 
-  const devices = await resolveDriverDevices(user_id);
+  // Message notifications target all app types (haul + driver); all others
+  // are driver-only job/booking events.
+  const deviceResolver = event_type === 'haul.message.created'
+    ? resolveUserDevices
+    : resolveDriverDevices;
+
+  const devices = await deviceResolver(user_id);
 
   if (devices.length === 0) {
-    console.warn('[PushChannel] No eligible driver devices for user', { user_id });
+    console.warn('[PushChannel] No eligible devices for user', { user_id, event_type });
     await updateDeliveryStatus(user_id, notification_id, notification_timestamp, 'failed', 'No eligible devices');
     return;
   }
 
   let anySuccess = false;
   for (const device of devices) {
-    const sent = await sendToDevice(device, { subject, body, event_type, entity_type, entity_id });
+    const sent = await sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number: bookingNumber });
     if (sent) anySuccess = true;
   }
 
@@ -117,7 +125,28 @@ async function resolveDriverDevices(userId) {
   }
 }
 
-async function sendToDevice(device, { subject, body, event_type, entity_type, entity_id }) {
+async function resolveUserDevices(userId) {
+  try {
+    const result = await docClient.send(new QueryCommand({
+      TableName: DEVICE_ENDPOINT_TABLE,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :prefix)',
+      FilterExpression: 'push_enabled = :enabled AND token_valid = :valid',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`,
+        ':prefix': 'DEVICE#',
+        ':enabled': true,
+        ':valid': true
+      }
+    }));
+
+    return result.Items || [];
+  } catch (error) {
+    console.error('[PushChannel] Error querying devices', { user_id: userId, error: error.message });
+    return [];
+  }
+}
+
+async function sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number }) {
   const { device_id, token, platform, user_id, env: deviceEnv, app: deviceApp } = device;
   const channelType = platform !== 'ios'
     ? 'GCM'
@@ -133,7 +162,8 @@ async function sendToDevice(device, { subject, body, event_type, entity_type, en
   const data = {
     event_type: String(event_type || ''),
     entity_type: String(entity_type || ''),
-    entity_id: String(entity_id || '')
+    entity_id: String(entity_id || ''),
+    booking_number: String(booking_number || '')
   };
 
   try {
@@ -158,6 +188,7 @@ async function sendToDevice(device, { subject, body, event_type, entity_type, en
                 event_type: data.event_type,
                 entity_type: data.entity_type,
                 entity_id: data.entity_id,
+                booking_number: data.booking_number,
               },
             }),
           },
