@@ -171,12 +171,13 @@ Using `UNNotificationAttachment` in the NSE puts the image as a **thumbnail on t
 ### End-to-end data flow
 
 ```
-haul-app / haul-driver-app
+haul-app / haul-driver-app / haul-web-dispatcher
   sendMessage() → POST /threads/{id}/messages
-    body: { body, sender_given_name, sender_profile_photo_key }
+    body: { body, sender_given_name, sender_profile_photo_key? }
         ↓
 haul-svc-messaging (threads/handlers.js)
-  stores sender_profile_photo_key on the DynamoDB message item
+  if sender_profile_photo_key omitted: User table lookup by Cognito sub → profile_photo_key
+  stores sender_profile_photo_key on the DynamoDB message item when resolved
   emitNotificationEvent() → EventBridge haul.message.created
     context.sender_profile_photo_key = <S3 key>
         ↓
@@ -315,12 +316,17 @@ Both call sites — fresh-target path (`target.uuid`) and existing-target re-run
 
 ### Required iOS capabilities
 
+#### Apple Developer portal (each iOS App ID: customer + driver)
+
+Enable **Communication Notifications** on the identifier. Regenerate/download provisioning profiles after enabling so signed builds include the entitlement.
+
 #### Main app (`app.config.ts` → `ios.entitlements`)
 
 ```typescript
 ios: {
   entitlements: {
     'com.apple.developer.siri': true,
+    'com.apple.developer.usernotifications.communication': true,
   },
   infoPlist: {
     NSUserActivityTypes: ['INSendMessageIntent'],
@@ -328,7 +334,7 @@ ios: {
 }
 ```
 
-Both are required. `com.apple.developer.siri` tells iOS this app can produce communication notifications. `NSUserActivityTypes` declares which intent types the app handles.
+`com.apple.developer.usernotifications.communication` is required for the iMessage-style banner (sender avatar on the left with app icon inset). Siri and `NSUserActivityTypes` remain required alongside it; Siri alone is not a substitute for Communication Notifications.
 
 #### NSE target — NO Siri entitlement
 
@@ -345,6 +351,10 @@ Adding `com.apple.developer.siri` to the NSE causes automatic signing to fail be
 - App in foreground — notification appears per `iosDisplayInForeground: true` setting in expo-notifications
 - User without a profile photo — notification delivers without avatar (fallback path in NSE)
 - Thread grouping — multiple messages from the same thread stack under one notification group
+
+### Verifying payload delivery (ops)
+
+After deploy, **PushChannel** logs a line per `haul.message.created` enqueue: `haul.message.created meta` with `has_sender_profile_photo_url: true|false`. Use this to confirm the orchestrator supplied a URL before Pinpoint sends. For full payload shape, capture APNS from Pinpoint test delivery or add temporary device-side logging; confirm `aps["mutable-content"] === 1` and `body.sender_profile_photo_url` is HTTPS and returns 200 from a normal GET (NSE uses anonymous `URLSession`).
 
 ---
 
@@ -365,5 +375,5 @@ When adding or modifying **message push notifications** specifically:
 - [ ] `aps.mutable-content: 1` set in APNs payload to trigger NSE
 - [ ] `body.sender_profile_photo_url` included (full URL, not S3 key)
 - [ ] NSE falls back gracefully to plain notification if image download fails
-- [ ] Main app has `com.apple.developer.siri` entitlement and `NSUserActivityTypes: ['INSendMessageIntent']` — NSE does NOT get the Siri entitlement
+- [ ] Main app has `com.apple.developer.siri`, `com.apple.developer.usernotifications.communication`, and `NSUserActivityTypes: ['INSendMessageIntent']` — Communication Notifications enabled on the App ID in Apple Developer; NSE does NOT get the Siri entitlement
 - [ ] After any plugin change: `npx expo prebuild --clean --platform ios` before rebuilding

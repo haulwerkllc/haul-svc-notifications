@@ -74,6 +74,12 @@ async function sendPushNotification(message) {
     ? (message.data?.sender_profile_photo_url || null)
     : null;
 
+  if (event_type === 'haul.message.created') {
+    console.log('[PushChannel] haul.message.created meta', {
+      has_sender_profile_photo_url: Boolean(senderProfilePhotoUrl),
+    });
+  }
+
   if (!PINPOINT_APP_ID || !PINPOINT_DRIVER_APP_ID) {
     console.error('[PushChannel] PINPOINT_APP_ID or PINPOINT_DRIVER_APP_ID not configured');
     await updateDeliveryStatus(user_id, notification_id, notification_timestamp, 'failed', 'Pinpoint not configured');
