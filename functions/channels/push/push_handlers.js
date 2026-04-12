@@ -73,10 +73,34 @@ async function sendPushNotification(message) {
   const senderProfilePhotoUrl = event_type === 'haul.message.created'
     ? (message.data?.sender_profile_photo_url || null)
     : null;
+  const jobId = entity_type === 'bid' ? (message.data?.job_id || null) : null;
+  const BOOKING_ICON_EVENTS = new Set([
+    'haul.booking.created',
+    'haul.booking.assigned',
+    'haul.booking.crew_en_route_pickup',
+    'haul.booking.in_progress_pickup',
+    'haul.booking.crew_en_route_dropoff',
+    'haul.booking.in_progress_dropoff',
+    'haul.booking.pending_confirmation',
+  ]);
+  const companyIconUrl = (
+    message.metadata?.recipient_type === 'customer' &&
+    BOOKING_ICON_EVENTS.has(event_type)
+  ) ? (message.data?.icon_url || null) : null;
 
   if (event_type === 'haul.message.created') {
     console.log('[PushChannel] haul.message.created meta', {
       has_sender_profile_photo_url: Boolean(senderProfilePhotoUrl),
+    });
+  }
+
+  if (BOOKING_ICON_EVENTS.has(event_type)) {
+    console.log('[PushChannel] booking event icon meta', {
+      event_type,
+      recipient_type: message.metadata?.recipient_type,
+      has_icon_url_in_data: Boolean(message.data?.icon_url),
+      icon_url: message.data?.icon_url || null,
+      company_icon_url: companyIconUrl,
     });
   }
 
@@ -86,11 +110,33 @@ async function sendPushNotification(message) {
     return;
   }
 
-  // Message notifications target all app types (haul + driver); all others
-  // are driver-only job/booking events.
-  const deviceResolver = event_type === 'haul.message.created'
-    ? resolveUserDevices
-    : resolveDriverDevices;
+  // Provider (OWNER/ADMIN/DISPATCHER) users receive email only for booking.assigned — skip push.
+  if (event_type === 'haul.booking.assigned' && message.metadata?.recipient_type === 'provider') {
+    console.log('[PushChannel] Skipping push for provider recipient on booking.assigned', { user_id });
+    return;
+  }
+
+  // Customer gets haul.booking.pending_confirmation as their completion push; skip push on completed.
+  if (event_type === 'haul.booking.completed' && message.metadata?.recipient_type === 'customer') {
+    console.log('[PushChannel] Skipping push for customer on booking.completed', { user_id });
+    return;
+  }
+
+  // Driver assignment notification requires different copy from the customer copy
+  // that the orchestrator pre-renders for this event.
+  const pushSubject = (event_type === 'haul.booking.assigned' && message.metadata?.recipient_type === 'driver')
+    ? `You've been assigned to booking ${bookingNumber}`
+    : subject;
+  const pushBody = (event_type === 'haul.booking.assigned' && message.metadata?.recipient_type === 'driver')
+    ? `You've been assigned to booking ${bookingNumber}.`
+    : body;
+
+  // Message notifications and customer-facing events target haul-app (resolveUserDevices).
+  // Service-provider events target driver-app (resolveDriverDevices).
+  // recipient_type is set by the resolver; absence falls back to driver devices (e.g. job.posted).
+  const isCustomer = event_type === 'haul.message.created'
+    || message.metadata?.recipient_type === 'customer';
+  const deviceResolver = isCustomer ? resolveUserDevices : resolveDriverDevices;
 
   const devices = await deviceResolver(user_id);
 
@@ -102,7 +148,7 @@ async function sendPushNotification(message) {
 
   let anySuccess = false;
   for (const device of devices) {
-    const sent = await sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number: bookingNumber, sender_profile_photo_url: senderProfilePhotoUrl });
+    const sent = await sendToDevice(device, { subject: pushSubject, body: pushBody, event_type, entity_type, entity_id, booking_number: bookingNumber, sender_profile_photo_url: senderProfilePhotoUrl, job_id: jobId, company_icon_url: companyIconUrl });
     if (sent) anySuccess = true;
   }
 
@@ -155,7 +201,7 @@ async function resolveUserDevices(userId) {
   }
 }
 
-async function sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number, sender_profile_photo_url }) {
+async function sendToDevice(device, { subject, body, event_type, entity_type, entity_id, booking_number, sender_profile_photo_url, job_id, company_icon_url }) {
   const { device_id, token, platform, user_id, env: deviceEnv, app: deviceApp } = device;
   const channelType = platform !== 'ios'
     ? 'GCM'
@@ -172,7 +218,8 @@ async function sendToDevice(device, { subject, body, event_type, entity_type, en
     event_type: String(event_type || ''),
     entity_type: String(entity_type || ''),
     entity_id: String(entity_id || ''),
-    booking_number: String(booking_number || '')
+    booking_number: String(booking_number || ''),
+    ...(job_id ? { job_id: String(job_id) } : {}),
   };
 
   try {
@@ -194,14 +241,16 @@ async function sendToDevice(device, { subject, body, event_type, entity_type, en
                 sound: 'default',
                 // mutable-content instructs iOS to invoke the Notification
                 // Service Extension before displaying the notification.
-                ...(event_type === 'haul.message.created' && { 'mutable-content': 1 }),
+                ...((event_type === 'haul.message.created' || company_icon_url) && { 'mutable-content': 1 }),
               },
               body: {
                 event_type: data.event_type,
                 entity_type: data.entity_type,
                 entity_id: data.entity_id,
                 booking_number: data.booking_number,
+                ...(data.job_id && { job_id: data.job_id }),
                 ...(sender_profile_photo_url && { sender_profile_photo_url }),
+                ...(company_icon_url && { company_icon_url }),
               },
             }),
           },

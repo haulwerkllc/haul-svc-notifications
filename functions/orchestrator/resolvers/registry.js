@@ -12,8 +12,11 @@ const BidCreatedResolver = require('./bid_created_resolver');
 const BidUpdatedResolver = require('./bid_updated_resolver');
 const BookingCreatedResolver = require('./booking_created_resolver');
 const BookingAssignedResolver = require('./booking_assigned_resolver');
+const BookingCrewEnRoutePickupResolver = require('./booking_crew_en_route_pickup_resolver');
 const BookingInProgressPickupResolver = require('./booking_in_progress_pickup_resolver');
+const BookingCrewEnRouteDropoffResolver = require('./booking_crew_en_route_dropoff_resolver');
 const BookingInProgressDropoffResolver = require('./booking_in_progress_dropoff_resolver');
+const BookingPendingConfirmationResolver = require('./booking_pending_confirmation_resolver');
 const BookingRescheduledResolver = require('./booking_rescheduled_resolver');
 const BookingCompletedResolver = require('./booking_completed_resolver');
 const BookingCanceledResolver = require('./booking_canceled_resolver');
@@ -31,8 +34,11 @@ const resolvers = [
   new BidUpdatedResolver(),
   new BookingCreatedResolver(),
   new BookingAssignedResolver(),
+  new BookingCrewEnRoutePickupResolver(),
   new BookingInProgressPickupResolver(),
+  new BookingCrewEnRouteDropoffResolver(),
   new BookingInProgressDropoffResolver(),
+  new BookingPendingConfirmationResolver(),
   new BookingRescheduledResolver(),
   new BookingCompletedResolver(),
   new BookingCanceledResolver(),

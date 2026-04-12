@@ -76,6 +76,8 @@ class BookingAssignedResolver extends NotificationResolver {
       const pickupStop = job.stops?.find(s => s.stop_type === 'PICKUP') || job.stops?.[0] || null;
       const pickupTimezone = pickupStop?.timezone || null;
 
+      const customerUserId = booking.customer_user_id || job.owner_user_id || null;
+
       event.context = {
         ...event.context,
         booking_id: bookingId,
@@ -86,6 +88,8 @@ class BookingAssignedResolver extends NotificationResolver {
         company_name: company?.name || null,
         logo_key: company?.logo_key || null,
         logo_url: company?.logo_key ? `${MEDIA_BASE_URL}/${company.logo_key}` : null,
+        icon_key: company?.icon_key || null,
+        icon_url: company?.icon_key ? `${MEDIA_BASE_URL}/${company.icon_key}` : null,
         amount_cents: booking.amount_cents,
         stops: job.stops,
         pickup_timezone: pickupTimezone,
@@ -95,6 +99,7 @@ class BookingAssignedResolver extends NotificationResolver {
         driver_given_name: driver?.given_name || null,
         profile_photo_key: driver?.profile_photo_key || null,
         profile_photo_url: driver?.profile_photo_key ? `${MEDIA_BASE_URL}/${driver.profile_photo_key}` : null,
+        customer_user_id: customerUserId,
       };
 
       console.log('[BookingAssignedResolver] Enriched event context', {
@@ -106,6 +111,16 @@ class BookingAssignedResolver extends NotificationResolver {
 
       // Step 6: Build recipients list
       const recipients = [];
+
+      // Add customer (job owner)
+      if (customerUserId) {
+        recipients.push({
+          user_id: customerUserId,
+          metadata: { recipient_type: 'customer' }
+        });
+      } else {
+        console.warn('[BookingAssignedResolver] Could not resolve customer user_id', { booking_id: bookingId });
+      }
 
       // Add service provider users (OWNER/ADMIN/DISPATCHER), excluding the driver
       // to prevent them receiving two emails if they hold a company role

@@ -374,7 +374,6 @@ Legend: `✓` = active, `—` = not applicable, `(conditional)` = deferred, `(fu
 | Booking | `haul.booking.crew_en_route_dropoff` | Customer | — | ✓ | ✓ | — | |
 | Booking | `haul.booking.in_progress_dropoff` | Customer | — | ✓ | ✓ | — | |
 | Booking | `haul.booking.pending_confirmation` | Customer | — | ✓ | — | — | |
-| Booking | `haul.booking.pending_confirmation` | Company | — | ✓ | — | — | |
 | Booking | `haul.booking.completed` | Company | ✓ | ✓ | — | — | |
 | Booking | `haul.booking.completed` | Customer | ✓ | ✓ | — | — | |
 | Booking | `haul.booking.canceled` | Company | ✓ | ✓ | — | — | |
@@ -398,7 +397,7 @@ Legend: `✓` = active, `—` = not applicable, `(conditional)` = deferred, `(fu
 - `haul.booking.in_progress_pickup` → customer (push + SMS)
 - `haul.booking.crew_en_route_dropoff` → customer (push + SMS)
 - `haul.booking.in_progress_dropoff` → customer (push + SMS)
-- `haul.booking.pending_confirmation` → customer + company (push)
+- `haul.booking.pending_confirmation` → customer only (push)
 - `haul.booking.completed` → customer + provider (email + push)
 - `haul.booking.canceled` → customer + company (email + push)
 

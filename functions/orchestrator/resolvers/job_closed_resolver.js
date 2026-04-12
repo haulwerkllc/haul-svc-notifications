@@ -53,7 +53,7 @@ class JobClosedResolver extends NotificationResolver {
         owner_user_id: ownerUserId
       });
 
-      return [{ user_id: ownerUserId }];
+      return [{ user_id: ownerUserId, metadata: { recipient_type: 'customer' } }];
     } catch (error) {
       console.error('[JobClosedResolver] Error resolving recipients', {
         job_id: jobId,

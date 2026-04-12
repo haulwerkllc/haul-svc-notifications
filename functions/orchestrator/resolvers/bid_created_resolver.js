@@ -80,7 +80,7 @@ class BidCreatedResolver extends NotificationResolver {
       });
 
       // Step 5: Return recipient
-      return [{ user_id: ownerUserId }];
+      return [{ user_id: ownerUserId, metadata: { recipient_type: 'customer' } }];
     } catch (error) {
       console.error('[BidCreatedResolver] Error resolving recipients', {
         bid_id: bidId,

@@ -236,11 +236,20 @@ async function constructNotificationContent(event) {
     case 'haul.booking.assigned':
       return constructBookingAssignedNotification(event);
     
+    case 'haul.booking.crew_en_route_pickup':
+      return constructBookingCrewEnRoutePickupNotification(event);
+
     case 'haul.booking.in_progress_pickup':
       return constructBookingInProgressPickupNotification(event);
-    
+
+    case 'haul.booking.crew_en_route_dropoff':
+      return constructBookingCrewEnRouteDropoffNotification(event);
+
     case 'haul.booking.in_progress_dropoff':
       return constructBookingInProgressDropoffNotification(event);
+
+    case 'haul.booking.pending_confirmation':
+      return constructBookingPendingConfirmationNotification(event);
     
     case 'haul.booking.rescheduled':
       return constructBookingRescheduledNotification(event);
@@ -1012,13 +1021,29 @@ async function queryOpenBidsForJob(jobId) {
  */
 function constructBookingCreatedNotification(event) {
   const bookingNumber = event.context?.booking_number || 'N/A';
-  
+  const companyName = event.context?.company_name || 'a service provider';
+
   console.log('[constructBookingCreatedNotification] event.context:', JSON.stringify(event.context, null, 2));
   console.log('[constructBookingCreatedNotification] job_type in context:', event.context?.job_type);
-  
+  console.log('[constructBookingCreatedNotification] instant_book:', event.context?.instant_book);
+
+  if (event.context?.instant_book) {
+    // Customer receives: company accepted their instant book price
+    return {
+      subject: `Booking confirmed – ${companyName} is on it`,
+      body: `Your instant booking has been accepted. Your job is booked.`,
+      entity: {
+        id: event.entity.id,
+        type: 'booking'
+      },
+      data: event.context || {}
+    };
+  }
+
+  // Company users receive: customer accepted their bid
   return {
-    subject: `Job won – Booking ${bookingNumber} created`,
-    body: `Your bid has been accepted and booking ${bookingNumber} has been created.`,
+    subject: `Job won – Booking ${bookingNumber} confirmed`,
+    body: `A customer has accepted your bid. Booking ${bookingNumber} is confirmed.`,
     entity: {
       id: event.entity.id,
       type: 'booking'
@@ -1040,9 +1065,13 @@ function constructBookingAssignedNotification(event) {
   console.log('[constructBookingAssignedNotification] booking_number:', event.context?.booking_number);
   console.log('[constructBookingAssignedNotification] driver_given_name:', event.context?.driver_given_name);
   
+  const driverGivenName = event.context?.driver_given_name || null;
+
   return {
     subject: `Crew assigned to booking ${bookingNumber}`,
-    body: `A crew has been assigned to your booking.`,
+    body: driverGivenName
+      ? `Crew leader ${driverGivenName} has been assigned to your booking.`
+      : `A crew has been assigned to your booking.`,
     entity: {
       id: event.entity.id,
       type: 'booking'
@@ -1057,16 +1086,55 @@ function constructBookingAssignedNotification(event) {
  * 
  * This event already contains all necessary data in event.context.
  */
-function constructBookingInProgressPickupNotification(event) {
-  const bookingNumber = event.context?.booking_number || 'N/A';
-  
+function getStopAddress(stops, stopType) {
+  const stop = stops?.find(s => s.stop_type === stopType) || stops?.[0] || null;
+  return stop?.display_name || stop?.line_1 || null;
+}
+
+/**
+ * Construct notification content for haul.booking.crew_en_route_pickup events
+ * Recipients: Customer
+ */
+function constructBookingCrewEnRoutePickupNotification(event) {
+  const address = getStopAddress(event.context?.stops, 'PICKUP');
   return {
-    subject: `Your service has started – Booking ${bookingNumber}`,
-    body: `Your service provider has started pickup for your booking.`,
-    entity: {
-      id: event.entity.id,
-      type: 'booking'
-    },
+    subject: 'Crew en route to pickup location',
+    body: address
+      ? `Your crew is en route to ${address}.`
+      : 'Your crew is en route to the pickup location.',
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.in_progress_pickup events
+ * Recipients: Customer
+ */
+function constructBookingInProgressPickupNotification(event) {
+  const address = getStopAddress(event.context?.stops, 'PICKUP');
+  return {
+    subject: 'Your crew has arrived for pickup',
+    body: address
+      ? `Pickup at ${address} is in progress.`
+      : 'Your crew has arrived and pickup is in progress.',
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.crew_en_route_dropoff events
+ * Recipients: Customer
+ */
+function constructBookingCrewEnRouteDropoffNotification(event) {
+  const address = getStopAddress(event.context?.stops, 'DROPOFF');
+  return {
+    subject: 'Crew en route to dropoff location',
+    body: address
+      ? `Your crew is en route to ${address}.`
+      : 'Your crew is en route to the dropoff location.',
+    entity: { id: event.entity.id, type: 'booking' },
     data: event.context || {}
   };
 }
@@ -1074,19 +1142,29 @@ function constructBookingInProgressPickupNotification(event) {
 /**
  * Construct notification content for haul.booking.in_progress_dropoff events
  * Recipients: Customer
- * 
- * This event already contains all necessary data in event.context.
  */
 function constructBookingInProgressDropoffNotification(event) {
-  const bookingNumber = event.context?.booking_number || 'N/A';
-  
+  const address = getStopAddress(event.context?.stops, 'DROPOFF');
   return {
-    subject: `Dropoff in progress – Booking ${bookingNumber}`,
-    body: `Your service provider is en route to the dropoff location.`,
-    entity: {
-      id: event.entity.id,
-      type: 'booking'
-    },
+    subject: 'Your crew has arrived for dropoff',
+    body: address
+      ? `Dropoff at ${address} is in progress.`
+      : 'Your crew has arrived and dropoff is in progress.',
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.pending_confirmation events
+ * Recipients: Customer
+ */
+function constructBookingPendingConfirmationNotification(event) {
+  const jobType = (event.context?.job_type || 'hauling').toLowerCase().replace(/_/g, ' ');
+  return {
+    subject: 'Your service has been completed',
+    body: `Congratulations! Your ${jobType} service has been completed.`,
+    entity: { id: event.entity.id, type: 'booking' },
     data: event.context || {}
   };
 }
@@ -1293,7 +1371,18 @@ function determineEnabledChannels(eventType, preferences) {
   const channels = [];
 
   // Email: enabled by default unless explicitly disabled or suppressed for this event type
-  const emailSuppressedEvents = ['haul.booking.assigned', 'haul.message.created'];
+  const emailSuppressedEvents = [
+    'haul.booking.assigned',
+    'haul.message.created',
+    'haul.job.canceled',
+    'haul.bid.created',
+    'haul.bid.updated',
+    'haul.booking.crew_en_route_pickup',  // push only
+    'haul.booking.in_progress_pickup',    // push only
+    'haul.booking.crew_en_route_dropoff', // push only
+    'haul.booking.in_progress_dropoff',   // push only
+    'haul.booking.pending_confirmation',  // push only
+  ];
   if (preferences.channels?.email !== false && !emailSuppressedEvents.includes(eventType)) {
     channels.push('email');
   }

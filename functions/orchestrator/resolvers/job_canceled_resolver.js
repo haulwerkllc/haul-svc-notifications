@@ -90,7 +90,10 @@ class JobCanceledResolver extends NotificationResolver {
         recipient_count: recipients.length
       });
 
-      return recipients;
+      return recipients.map(r => ({
+        user_id: r.user_id,
+        metadata: { recipient_type: 'service_provider' }
+      }));
     } catch (error) {
       console.error('[JobCanceledResolver] Error resolving recipients', {
         job_id: jobId,
