@@ -205,12 +205,33 @@ async function sendToDevice(device, { subject, body, event_type, entity_type, en
               },
             }),
           },
+          // RawContent gives full control over the FCM payload sent to the device.
+          // Using Title/Body fields causes Pinpoint to place them in data as
+          // pinpoint.notification.* instead of a real FCM notification object,
+          // which Android cannot display when the app is in the background/killed.
           GCMMessage: {
-            Action: 'OPEN_APP',
-            Title: subject,
-            Body: pushBody,
-            Sound: 'default',
-            Data: data
+            RawContent: JSON.stringify({
+              notification: {
+                title: subject,
+                body: pushBody,
+                sound: 'default',
+              },
+              priority: 'high',
+              android: {
+                priority: 'high',
+                notification: {
+                  channel_id: 'default',
+                  sound: 'default',
+                  default_vibrate_timings: true,
+                  notification_priority: 'PRIORITY_MAX',
+                  visibility: 'PUBLIC'
+                },
+              },
+              data: {
+                ...data,
+                ...(sender_profile_photo_url && { sender_profile_photo_url }),
+              },
+            }),
           }
         }
       }
