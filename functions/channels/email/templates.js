@@ -24,8 +24,8 @@ function buildServiceProviderTemplate({ subject, preheader, bodyContent, footerN
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="light">
-  <meta name="supported-color-schemes" content="light">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
   <title>${escapeHtml(subject)}</title>
   <style>
     body {
@@ -124,6 +124,12 @@ function buildServiceProviderTemplate({ subject, preheader, bodyContent, footerN
       height: 1px;
       background-color: #e5e7eb;
     }
+    .logo-light { display: block; }
+    .logo-dark { display: none; max-height: 0; overflow: hidden; }
+    @media (prefers-color-scheme: dark) {
+      .logo-light { display: none !important; max-height: 0 !important; overflow: hidden !important; }
+      .logo-dark { display: block !important; max-height: none !important; overflow: visible !important; }
+    }
   </style>
 </head>
 <body>
@@ -133,7 +139,8 @@ function buildServiceProviderTemplate({ subject, preheader, bodyContent, footerN
       ${bodyContent}
     </div>
     <div class="footer">
-      <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_black.svg" alt="Haul" class="footer-logo">
+      <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_black.svg" alt="Haul" class="footer-logo logo-light">
+      <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_white.svg" alt="Haul" class="footer-logo logo-dark">
       <p style="margin: 0 0 8px 0;">${footerNote || 'You received this because you have a service area that matches this job location.'} 
         Please visit the Haul Dispatcher Portal to update your <a href="${DISPATCHER_BASE_URL}/dashboard/profile/notifications">notification preferences</a>. 
         If you believe you received this email in error, contact us at <a href="mailto:${SUPPORT_EMAIL}">support@haulwerk.com</a>.
@@ -157,8 +164,8 @@ function buildConsumerTemplate({ subject, preheader, bodyContent, footerNote }) 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="light">
-  <meta name="supported-color-schemes" content="light">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
   <title>${escapeHtml(subject)}</title>
   <style>
     body {
@@ -254,6 +261,12 @@ function buildConsumerTemplate({ subject, preheader, bodyContent, footerNote }) 
       height: 1px;
       background-color: #e5e7eb;
     }
+    .logo-light { display: block; }
+    .logo-dark { display: none; max-height: 0; overflow: hidden; }
+    @media (prefers-color-scheme: dark) {
+      .logo-light { display: none !important; max-height: 0 !important; overflow: hidden !important; }
+      .logo-dark { display: block !important; max-height: none !important; overflow: visible !important; }
+    }
   </style>
 </head>
 <body>
@@ -263,7 +276,8 @@ function buildConsumerTemplate({ subject, preheader, bodyContent, footerNote }) 
       ${bodyContent}
     </div>
     <div class="footer">
-      <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_blue_char.svg" alt="Haul" class="footer-logo">
+      <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_blue_char.svg" alt="Haul" class="footer-logo logo-light">
+      <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_white_char.svg" alt="Haul" class="footer-logo logo-dark">
       ${footerNote ? `<p style="margin: 0 0 12px 0;">${footerNote}</p>` : ''}
       <p style="margin: 0 0 8px 0;">You received this because you have subscribed to transactional notifications from Haul.
         Please visit the Haul app or website to update your <a href="${BASE_URL}/user/preferences">notification preferences</a>· 
@@ -553,10 +567,6 @@ function buildJobClosedWithQuotesEmail({ jobType, location, bidCount, jobId }) {
     </div>
     
     <p>Review your quotes and select one to book your service.</p>
-    
-    <div class="cta">
-      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Review quotes</a>
-    </div>
   `;
   
   // Plain text version
@@ -611,10 +621,6 @@ function buildJobClosedNoQuotesEmail({ jobType, location, jobId }) {
     <p>This can happen when providers in your area are at capacity or during high-demand periods.</p>
     
     <p>You can repost your job to try again, or adjust the timing to improve your chances of receiving quotes.</p>
-    
-    <div class="cta">
-      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View job</a>
-    </div>
   `;
   
   // Plain text version
@@ -669,10 +675,6 @@ function buildInstantBookExpiredEmail({ jobType, location, jobId }) {
     <p>This can happen when providers in your area are unavailable or the instant book price is below their current rates.</p>
 
     <p>You can repost the job to receive competitive bids from local providers, or try again with a different instant book price.</p>
-
-    <div class="cta">
-      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View job</a>
-    </div>
   `;
 
   const textParts = [
@@ -725,10 +727,6 @@ function buildJobExpiredNoSelectionEmail({ jobType, location, jobId }) {
     </div>
 
     <p>If you still need the service, you can repost the job to receive new bids.</p>
-
-    <div class="cta">
-      <a href="${BASE_URL}/jobs/${jobId}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View job</a>
-    </div>
   `;
 
   const textParts = [
@@ -1093,9 +1091,6 @@ function buildBookingCreatedCustomerEmail(data) {
       </div>` : ''}
     </div>
     <p>You'll receive updates as your crew is assigned and your service day approaches.</p>
-    <div class="cta">
-      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
-    </div>
   `;
 
   const textParts = [
@@ -1353,10 +1348,6 @@ function buildBookingCompletedCustomerEmail(data) {
     </div>
 
     <p>We hope everything went smoothly. Your receipt will follow once payment is processed.</p>
-
-    <div class="cta">
-      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
-    </div>
   `;
 
   const textParts = [
@@ -1495,10 +1486,6 @@ function buildBookingCanceledCustomerEmail(data) {
     </div>
 
     <p>If a charge was made, any applicable refund will be processed within 5-10 business days. Contact us if you have questions.</p>
-
-    <div class="cta">
-      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View bookings</a>
-    </div>
   `;
 
   const textParts = [
@@ -1552,10 +1539,6 @@ function buildPaymentAuthorizationFailedEmail(data) {
     </div>` : ''}
 
     <p>This may be due to insufficient funds, an expired card, or a block placed by your bank. Please update your payment method or contact your bank for details.</p>
-
-    <div class="cta">
-      <a href="${BASE_URL}/settings/payment" class="cta-button" style="color:#ffffff !important;text-decoration:none;">Update payment method</a>
-    </div>
   `;
 
   const textParts = [
@@ -1739,9 +1722,6 @@ function buildPaymentCapturedEmail(data) {
 
     ${serviceDetailsHtml}
 
-    <div style="margin: 24px 0;">
-      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
-    </div>
     ${platformFooterHtml}
   `;
 
