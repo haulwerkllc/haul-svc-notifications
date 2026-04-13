@@ -1229,12 +1229,96 @@ function buildBookingCompletedProviderEmail(data) {
     ? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: timezone || 'UTC' }).format(new Date(data.completed_at))
     : 'N/A';
 
+  const platformFeePct = data.platform_fee_pct;
+  const platformFeeCents = data.platform_fee_cents || 0;
+  const tipAmountCents = data.tip_amount_cents || 0;
+  const netEarningsCents = data.net_earnings_cents != null ? data.net_earnings_cents : amountCents;
+  const hasEarningsBreakdown = platformFeePct != null;
+  const trustFeeAmountCents = data.trust_fee_amount_cents || 0;
+  const taxAmountCents = data.tax_amount_cents || 0;
+  const trustFeePct = data.trust_fee_pct;
+  const trustFeeCapCents = data.trust_fee_cap_cents;
+  const customerTotalCents = data.customer_total_cents || 0;
+  const hasCustomerSection = customerTotalCents > 0;
+  const customerJobType = data.job_type
+    ? (data.job_type === 'JUNK_REMOVAL' ? 'Junk Removal' : data.job_type === 'MOVING' ? 'Moving' : data.job_type.charAt(0).toUpperCase() + data.job_type.slice(1).toLowerCase().replace(/_/g, ' ')) + ' Services'
+    : 'Services';
+
   const subject = `Booking ${bookingNumber} complete`;
   const preheader = `Booking ${bookingNumber} has been marked complete.`;
 
   const bodyContent = `
     <h1>Booking complete</h1>
     <p>Booking <strong>${escapeHtml(bookingNumber)}</strong> has been completed.</p>
+
+    <div style="margin: 20px 0 4px 0;">
+      <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 6px 0;">Your Earnings</p>
+      <p style="font-size: 24px; font-weight: 600; color: #171717; margin: 0; line-height: 1.2;">${formatCentsToDisplay(netEarningsCents)}</p>
+    </div>
+
+    ${hasEarningsBreakdown ? `
+    <table width="100%" style="border-collapse: collapse; margin: 16px 0 24px 0;">
+      <tr>
+        <td style="padding: 8px 0; font-size: 14px; color: #6b7280; border-top: 1px solid #e5e7eb;">Booking</td>
+        <td style="padding: 8px 0; font-size: 14px; text-align: right; border-top: 1px solid #e5e7eb;">${formatCentsToDisplay(amountCents)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; font-size: 14px; color: #6b7280;">Platform Fee (${Math.round(platformFeePct * 100)}%)</td>
+        <td style="padding: 8px 0; font-size: 14px; text-align: right; color: #dc2626;">(${formatCentsToDisplay(platformFeeCents)})</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; font-size: 14px; color: #6b7280; border-top: 1px solid #e5e7eb;">Net Booking</td>
+        <td style="padding: 8px 0; font-size: 14px; text-align: right; border-top: 1px solid #e5e7eb;">${formatCentsToDisplay(amountCents - platformFeeCents)}</td>
+      </tr>
+      ${tipAmountCents > 0 ? `
+      <tr>
+        <td style="padding: 8px 0; font-size: 14px; color: #6b7280;">Tip</td>
+        <td style="padding: 8px 0; font-size: 14px; text-align: right;">${formatCentsToDisplay(tipAmountCents)}</td>
+      </tr>` : ''}
+      <tr>
+        <td style="padding: 8px 0; font-size: 14px; font-weight: 600; color: #171717; border-top: 1px solid #e5e7eb;">Net Earnings</td>
+        <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right; border-top: 1px solid #e5e7eb;">${formatCentsToDisplay(netEarningsCents)}</td>
+      </tr>
+    </table>` : `
+    <div style="margin: 16px 0 24px 0; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+      <div class="detail-row">
+        <span class="detail-label">Amount</span>
+        <span class="detail-value">$${escapeHtml(amountDollars)}</span>
+      </div>
+    </div>`}
+
+    ${hasCustomerSection ? `
+    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+      <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 8px 0;">Customer Charged</p>
+      <table width="100%" style="border-collapse: collapse;">
+        <tr>
+          <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">${escapeHtml(customerJobType)}</td>
+          <td style="padding: 6px 0; font-size: 14px; text-align: right;">${formatCentsToDisplay(amountCents)}</td>
+        </tr>
+        ${trustFeeAmountCents > 0 ? `
+        <tr>
+          <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">
+            Service &amp; Trust Fee
+            ${trustFeePct != null || trustFeeCapCents != null ? `<div style="font-size: 11px; color: #9ca3af; margin-top: 2px;">(${trustFeePct != null ? `${Math.round(trustFeePct * 100)}%` : ''}${trustFeePct != null && trustFeeCapCents != null ? ', ' : ''}${trustFeeCapCents != null ? `capped at $${Math.round(trustFeeCapCents / 100)}` : ''})</div>` : ''}
+          </td>
+          <td style="padding: 6px 0; font-size: 14px; text-align: right; vertical-align: top;">${formatCentsToDisplay(trustFeeAmountCents)}</td>
+        </tr>` : ''}
+        ${taxAmountCents > 0 ? `
+        <tr>
+          <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Taxes</td>
+          <td style="padding: 6px 0; font-size: 14px; text-align: right;">${formatCentsToDisplay(taxAmountCents)}</td>
+        </tr>` : ''}
+        ${tipAmountCents > 0 ? `
+        <tr>
+          <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Tip</td>
+          <td style="padding: 6px 0; font-size: 14px; text-align: right;">${formatCentsToDisplay(tipAmountCents)}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding: 8px 0 4px 0; font-size: 14px; font-weight: 600; color: #171717; border-top: 1px solid #e5e7eb;">Total</td>
+          <td style="padding: 8px 0 4px 0; font-size: 14px; font-weight: 600; text-align: right; border-top: 1px solid #e5e7eb;">${formatCentsToDisplay(customerTotalCents)}</td>
+        </tr>
+      </table>
+    </div>` : ''}
 
     <div style="margin: 24px 0;">
       <div class="detail-row">
@@ -1250,16 +1334,12 @@ function buildBookingCompletedProviderEmail(data) {
         <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
       </div>` : ''}
       <div class="detail-row">
-        <span class="detail-label">Amount</span>
-        <span class="detail-value">$${escapeHtml(amountDollars)}</span>
-      </div>
-      <div class="detail-row">
         <span class="detail-label">Completed</span>
         <span class="detail-value">${escapeHtml(completedAt)}</span>
       </div>
     </div>
 
-    <p>Payment is being processed and will be released to your account after the standard hold period.</p>
+    <p style="margin-top: 24px;">Payment is being processed and will be released to your account after the standard hold period.</p>
 
     <div class="cta">
       <a href="${DISPATCHER_BASE_URL}/bookings/${data.booking_id}" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
@@ -1274,7 +1354,22 @@ function buildBookingCompletedProviderEmail(data) {
     `Booking No.: ${bookingNumber}`,
     `Pickup: ${pickupAddress}`,
     ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
-    `Amount: $${amountDollars}`,
+    ...(hasEarningsBreakdown ? [
+      `Booking: ${formatCentsToDisplay(amountCents)}`,
+      `Platform Fee (${Math.round(platformFeePct * 100)}%): (${formatCentsToDisplay(platformFeeCents)})`,
+      `Net Booking: ${formatCentsToDisplay(amountCents - platformFeeCents)}`,
+      ...(tipAmountCents > 0 ? [`Tip: ${formatCentsToDisplay(tipAmountCents)}`] : []),
+      `Net Earnings: ${formatCentsToDisplay(netEarningsCents)}`,
+    ] : [`Amount: $${amountDollars}`]),
+    ...(hasCustomerSection ? [
+      '',
+      'Customer Charged',
+      `${customerJobType}: ${formatCentsToDisplay(amountCents)}`,
+      ...(trustFeeAmountCents > 0 ? [`Service & Trust Fee: ${formatCentsToDisplay(trustFeeAmountCents)}`] : []),
+      ...(taxAmountCents > 0 ? [`Taxes: ${formatCentsToDisplay(taxAmountCents)}`] : []),
+      ...(tipAmountCents > 0 ? [`Tip: ${formatCentsToDisplay(tipAmountCents)}`] : []),
+      `Total: ${formatCentsToDisplay(customerTotalCents)}`,
+    ] : []),
     `Completed: ${completedAt}`,
     '',
     'Payment is being processed and will be released to your account after the standard hold period.',
@@ -1584,6 +1679,9 @@ function buildPaymentCapturedEmail(data) {
   const companyName = data.company_name || 'your service provider';
   const driverGivenName = data.driver_given_name || null;
   const jobType = data.job_type ? normalizeJobType(data.job_type) : 'Service';
+  const jobTypeDisplay = data.job_type
+    ? jobType.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + ' Services'
+    : 'Services';
   const pickupStop = getPickupStop(data.stops);
   const dropoffStop = data.stops ? data.stops.find(s => s.stop_type === 'DROPOFF') : null;
   const pickupAddress = formatAddress(pickupStop);
@@ -1615,28 +1713,23 @@ function buildPaymentCapturedEmail(data) {
   // --- Line items table ---
   let lineItemsRows = '';
   if (agg) {
-    // Trust fee label
-    let trustFeeLabel = 'Service &amp; Trust Fee';
-    if (agg.trust_fee_pct != null) {
-      trustFeeLabel += ` (${Math.round(agg.trust_fee_pct * 100)}%)`;
-    }
+    // Trust fee qualifier: "(5%, capped at $50)" or "(5%)" on a sub-line
+    const trustFeeQualifierParts = [];
+    if (agg.trust_fee_pct != null) trustFeeQualifierParts.push(`${Math.round(agg.trust_fee_pct * 100)}%`);
+    if (agg.trust_fee_cap_cents != null) trustFeeQualifierParts.push(`capped at $${Math.round(agg.trust_fee_cap_cents / 100)}`);
+    const trustFeeQualifier = trustFeeQualifierParts.length > 0
+      ? `<div style="font-size: 11px; color: #9ca3af; margin-top: 2px;">(${trustFeeQualifierParts.join(', ')})</div>`
+      : '';
 
     lineItemsRows += `
       <tr>
-        <td style="padding: 6px 0; vertical-align: top;">${escapeHtml(jobType)}</td>
+        <td style="padding: 6px 0; vertical-align: top;">${escapeHtml(jobTypeDisplay)}</td>
         <td style="padding: 6px 0; text-align: right; white-space: nowrap; font-weight: 600;">${formatCentsToDisplay(agg.booking_amount_cents)}</td>
       </tr>
       <tr>
-        <td style="padding: 6px 0; vertical-align: top; color: #6b7280; font-size: 13px;">${trustFeeLabel}</td>
-        <td style="padding: 6px 0; text-align: right; white-space: nowrap; color: #6b7280; font-size: 13px;">${formatCentsToDisplay(agg.trust_fee_amount_cents)}</td>
+        <td style="padding: 6px 0; vertical-align: top; color: #6b7280; font-size: 13px;">Service &amp; Trust Fee${trustFeeQualifier}</td>
+        <td style="padding: 6px 0; text-align: right; white-space: nowrap; color: #6b7280; font-size: 13px; vertical-align: top;">${formatCentsToDisplay(agg.trust_fee_amount_cents)}</td>
       </tr>`;
-
-    if (agg.trust_fee_cap_cents != null) {
-      lineItemsRows += `
-      <tr>
-        <td colspan="2" style="padding: 2px 0 6px 0; font-size: 12px; color: #9ca3af;">Capped at $${Math.round(agg.trust_fee_cap_cents / 100)}</td>
-      </tr>`;
-    }
     if (agg.tax_amount_cents > 0) {
       lineItemsRows += `
       <tr>
@@ -1690,13 +1783,13 @@ function buildPaymentCapturedEmail(data) {
   // --- Service details ---
   const serviceDetailRows = [];
   if (completedAt) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Service date</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(completedAt)}</td></tr>`);
-  serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Service type</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(jobType)}</td></tr>`);
+  serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Service type</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(jobTypeDisplay)}</td></tr>`);
   if (provider) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Provider</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(provider)}</td></tr>`);
   if (pickupAddress) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Pickup</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(pickupAddress)}</td></tr>`);
   if (dropoffAddress) serviceDetailRows.push(`<tr><td style="color:#6b7280;width:120px;padding:3px 0;font-size:13px;">Dropoff</td><td style="padding:3px 0;font-size:13px;">${escapeHtml(dropoffAddress)}</td></tr>`);
 
   const serviceDetailsHtml = serviceDetailRows.length > 0 ? `
-    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+    <div style="margin-top: 24px; padding-top: 20px; padding-bottom: 20px; border-top: 1px solid #e5e7eb;">
       <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 8px 0;">Service Details</p>
       <table width="100%" style="border-collapse: collapse;">${serviceDetailRows.join('')}</table>
     </div>` : '';
@@ -1709,10 +1802,23 @@ function buildPaymentCapturedEmail(data) {
 
   // --- Full body ---
   const bodyContent = `
-    <div style="margin-bottom: 8px;">
-      <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 4px 0;">Receipt</p>
-      ${bookingNumber !== 'N/A' ? `<p style="font-size: 13px; color: #6b7280; margin: 0;">Booking No. ${escapeHtml(bookingNumber)}</p>` : ''}
-    </div>
+    <table width="100%" style="border-collapse: collapse; margin-bottom: 20px;">
+      <tr>
+        <td style="vertical-align: top;">
+          <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_blue_char.svg" alt="Haul" class="logo-light" style="width: 80px; height: auto; display: block;">
+          <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_white_char.svg" alt="Haul" class="logo-dark" style="width: 80px; height: auto; display: block;">
+          <div style="font-size: 11px; color: #6b7280; line-height: 1.7; margin-top: 8px;">
+            <div>${escapeHtml(platformLegalName)}</div>
+            ${platformAddress ? platformAddress.split('\n').map(l => `<div>${escapeHtml(l)}</div>`).join('') : ''}
+            ${supportEmail ? `<div><a href="mailto:${escapeHtml(supportEmail)}" style="color: #6b7280; text-decoration: none;">${escapeHtml(supportEmail)}</a></div>` : ''}
+          </div>
+        </td>
+        <td style="vertical-align: top; text-align: right;">
+          <p style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin: 0 0 4px 0;">Receipt</p>
+          ${bookingNumber !== 'N/A' ? `<p style="font-size: 13px; color: #6b7280; margin: 0;">Booking No. ${escapeHtml(bookingNumber)}</p>` : ''}
+        </td>
+      </tr>
+    </table>
 
     <table width="100%" style="border-collapse: collapse; margin: 20px 0;">
       ${lineItemsRows}
@@ -1721,8 +1827,6 @@ function buildPaymentCapturedEmail(data) {
     ${paymentMethodHtml}
 
     ${serviceDetailsHtml}
-
-    ${platformFooterHtml}
   `;
 
   // --- Plain text ---
@@ -1732,11 +1836,12 @@ function buildPaymentCapturedEmail(data) {
   ];
 
   if (agg) {
-    textParts.push(`${jobType}: ${formatCentsToDisplay(agg.booking_amount_cents)}`);
-    let trustFeeLabel = 'Service & Trust Fee';
-    if (agg.trust_fee_pct != null) trustFeeLabel += ` (${Math.round(agg.trust_fee_pct * 100)}%)`;
+    textParts.push(`${jobTypeDisplay}: ${formatCentsToDisplay(agg.booking_amount_cents)}`);
+    const tfParts = [];
+    if (agg.trust_fee_pct != null) tfParts.push(`${Math.round(agg.trust_fee_pct * 100)}%`);
+    if (agg.trust_fee_cap_cents != null) tfParts.push(`capped at $${Math.round(agg.trust_fee_cap_cents / 100)}`);
+    const trustFeeLabel = tfParts.length > 0 ? `Service & Trust Fee (${tfParts.join(', ')})` : 'Service & Trust Fee';
     textParts.push(`${trustFeeLabel}: ${formatCentsToDisplay(agg.trust_fee_amount_cents)}`);
-    if (agg.trust_fee_cap_cents != null) textParts.push(`  Capped at $${Math.round(agg.trust_fee_cap_cents / 100)}`);
     if (agg.tax_amount_cents > 0) textParts.push(`Taxes: ${formatCentsToDisplay(agg.tax_amount_cents)}`);
     if (agg.tip_amount_cents > 0) textParts.push(`Tip: ${formatCentsToDisplay(agg.tip_amount_cents)}`);
     textParts.push(`Total: ${totalFormatted}`);
@@ -1753,7 +1858,7 @@ function buildPaymentCapturedEmail(data) {
   }
 
   if (completedAt) textParts.push(`Service date: ${completedAt}`);
-  textParts.push(`Service type: ${jobType}`);
+  textParts.push(`Service type: ${jobTypeDisplay}`);
   if (provider) textParts.push(`Provider: ${provider}`);
   if (pickupAddress) textParts.push(`Pickup: ${pickupAddress}`);
   if (dropoffAddress) textParts.push(`Dropoff: ${dropoffAddress}`);

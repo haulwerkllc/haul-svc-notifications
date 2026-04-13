@@ -7,12 +7,72 @@
  * Triggered by: SNS topic for inbound SMS routing
  */
 
+const { PinpointSMSVoiceV2Client, SendTextMessageCommand } = require('@aws-sdk/client-pinpoint-sms-voice-v2');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+
+const pinpointClient = new PinpointSMSVoiceV2Client({ region: process.env.REGION });
+const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
+const docClient = DynamoDBDocumentClient.from(dynamoClient);
+
+const SMS_SUPPRESSION_TABLE = process.env.SMS_SUPRESSION_TABLE_NAME;
+const SMS_ORIGINATION_IDENTITY_ARN = process.env.SMS_ORIGINATION_IDENTITY_ARN;
+
+/**
+ * Send a reply SMS to an inbound number.
+ * Failures are logged but not thrown — the reply is best-effort.
+ * @param {string} destinationNumber - E.164 phone number to reply to
+ * @param {string} messageBody - SMS text to send
+ */
+async function sendReply(destinationNumber, messageBody) {
+  try {
+    await pinpointClient.send(new SendTextMessageCommand({
+      DestinationPhoneNumber: destinationNumber,
+      OriginationIdentity: SMS_ORIGINATION_IDENTITY_ARN,
+      MessageBody: messageBody,
+      MessageType: 'TRANSACTIONAL'
+    }));
+    console.log('[SmsInbound] Reply sent', { to: destinationNumber });
+  } catch (error) {
+    console.error('[SmsInbound] Failed to send reply SMS', {
+      to: destinationNumber,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Add a phone number to the SmsSuppression table.
+ * @param {string} phoneNumber - E.164 phone number
+ */
+async function addToSuppression(phoneNumber) {
+  await docClient.send(new PutCommand({
+    TableName: SMS_SUPPRESSION_TABLE,
+    Item: {
+      id: phoneNumber,
+      suppressed_at: new Date().toISOString(),
+      reason: 'STOP'
+    }
+  }));
+}
+
+/**
+ * Remove a phone number from the SmsSuppression table.
+ * @param {string} phoneNumber - E.164 phone number
+ */
+async function removeFromSuppression(phoneNumber) {
+  await docClient.send(new DeleteCommand({
+    TableName: SMS_SUPPRESSION_TABLE,
+    Key: { id: phoneNumber }
+  }));
+}
+
 /**
  * Keyword mappings for SMS commands
  */
 const KEYWORDS = {
-  STOP: ['STOP', 'END'],
-  START: ['JOIN', 'START'],
+  STOP: ['STOP', 'END', 'FUCK YOU', 'FUCK OFF'],
+  START: ['JOIN', 'START', 'GET MESSAGES', 'RESTART'],
   HELP: ['HELP', 'SUPPORT']
 };
 
@@ -112,29 +172,44 @@ exports.handler = async (event) => {
         messageBody
       });
 
-      // TODO: Implement handler logic for each keyword type
       switch (keyword) {
         case 'STOP':
-          console.log('[SmsInbound] STOP request - handler not yet implemented', {
-            from: originationNumber
-          });
-          // TODO: Add phone number to SmsSuppression table
-          // TODO: Send confirmation SMS
+          try {
+            await addToSuppression(originationNumber);
+            console.log('[SmsInbound] STOP: added to suppression', { from: originationNumber });
+          } catch (error) {
+            console.error('[SmsInbound] STOP: failed to write suppression record', {
+              from: originationNumber,
+              error: error.message
+            });
+          }
+          await sendReply(
+            originationNumber,
+            'You have been unsubscribed from Haul SMS notifications. Reply START to re-subscribe.'
+          );
           break;
 
         case 'START':
-          console.log('[SmsInbound] START request - handler not yet implemented', {
-            from: originationNumber
-          });
-          // TODO: Remove phone number from SmsSuppression table
-          // TODO: Send confirmation SMS
+          try {
+            await removeFromSuppression(originationNumber);
+            console.log('[SmsInbound] START: removed from suppression', { from: originationNumber });
+          } catch (error) {
+            console.error('[SmsInbound] START: failed to remove suppression record', {
+              from: originationNumber,
+              error: error.message
+            });
+          }
+          await sendReply(
+            originationNumber,
+            'You are now subscribed to Haul SMS notifications. Reply STOP to unsubscribe at any time. Reply HELP for support.'
+          );
           break;
 
         case 'HELP':
-          console.log('[SmsInbound] HELP request - handler not yet implemented', {
-            from: originationNumber
-          });
-          // TODO: Send help information SMS
+          await sendReply(
+            originationNumber,
+            'Haul Support: support.haulwerk.com | support@haulwerk.com. Reply STOP to unsubscribe.'
+          );
           break;
 
         default:

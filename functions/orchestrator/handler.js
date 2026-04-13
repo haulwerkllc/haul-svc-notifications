@@ -165,7 +165,7 @@ async function processRecipient(recipient, event) {
   const preferences = await loadNotificationPreferences(userId);
 
   // Determine which channels are enabled for this event type
-  const enabledChannels = determineEnabledChannels(event.event_type, preferences);
+  const enabledChannels = determineEnabledChannels(event.event_type, preferences, recipient.metadata);
 
   console.log('[Orchestrator] Enabled channels for recipient', {
     user_id: userId,
@@ -1031,7 +1031,7 @@ function constructBookingCreatedNotification(event) {
     // Customer receives: company accepted their instant book price
     return {
       subject: `Booking confirmed – ${companyName} is on it`,
-      body: `Your instant booking has been accepted. Your job is booked.`,
+      body: `Your instant booking has been accepted by ${companyName}. Your job is booked.`,
       entity: {
         id: event.entity.id,
         type: 'booking'
@@ -1367,7 +1367,7 @@ async function loadNotificationPreferences(userId) {
 /**
  * Determine which channels are enabled for a given event type and user preferences
  */
-function determineEnabledChannels(eventType, preferences) {
+function determineEnabledChannels(eventType, preferences, metadata = {}) {
   const channels = [];
 
   // Email: enabled by default unless explicitly disabled or suppressed for this event type
@@ -1394,7 +1394,16 @@ function determineEnabledChannels(eventType, preferences) {
 
   // SMS: must be explicitly enabled (Phase 3)
   if (preferences.channels?.sms === true) {
-    channels.push('sms');
+    // These events send SMS only when push is disabled (SMS as push fallback).
+    // booking.assigned customer follows the same rule; driver always gets SMS.
+    const SMS_PUSH_FALLBACK_EVENTS = ['haul.job.posted', 'haul.booking.created', 'haul.bid.created'];
+    const isBookingAssignedCustomer = eventType === 'haul.booking.assigned'
+      && metadata?.recipient_type === 'customer';
+    const skipSmsFallback = (SMS_PUSH_FALLBACK_EVENTS.includes(eventType) || isBookingAssignedCustomer)
+      && preferences.channels?.push === true;
+    if (!skipSmsFallback) {
+      channels.push('sms');
+    }
   }
 
   return channels;

@@ -378,7 +378,7 @@ Legend: `✓` = active, `—` = not applicable, `(conditional)` = deferred, `(fu
 | Booking | `haul.booking.completed` | Customer | ✓ | ✓ | — | — | |
 | Booking | `haul.booking.canceled` | Company | ✓ | ✓ | — | — | |
 | Booking | `haul.booking.canceled` | Customer | ✓ | ✓ | — | — | |
-| Payments | `haul.payment.authorization_failed` | Customer | ✓ | ✓ | — | — | |
+| Payments | `haul.payment.authorization_failed` | Customer | ✓ | ✓ | ✓ | — | |
 | Payments | `haul.payment.captured` | Customer | ✓ | — | — | — | Receipt / happy path |
 | Payouts | `haul.payout.sent` | Company | ✓ | ✓ | — | — | |
 

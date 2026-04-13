@@ -46,7 +46,7 @@ function formatPlatformAddress(address) {
   const cityState = [address.city, address.state].filter(Boolean).join(', ');
   const cityStateZip = [cityState, address.postal_code].filter(Boolean).join(' ');
   if (cityStateZip) parts.push(cityStateZip);
-  return parts.join(', ') || null;
+  return parts.join('\n') || null;
 }
 
 /**
