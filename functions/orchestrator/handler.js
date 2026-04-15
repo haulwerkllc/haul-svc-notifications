@@ -21,6 +21,7 @@ const EMAIL_QUEUE_URL = process.env.EMAIL_QUEUE_URL;
 const PUSH_QUEUE_URL = process.env.PUSH_QUEUE_URL;
 const SMS_QUEUE_URL = process.env.SMS_QUEUE_URL;
 const ADMIN_QUEUE_URL = process.env.ADMIN_QUEUE_URL;
+const LIVE_ACTIVITY_QUEUE_URL = process.env.LIVE_ACTIVITY_QUEUE_URL;
 
 /**
  * Notifications Orchestrator Lambda
@@ -1406,6 +1407,18 @@ function determineEnabledChannels(eventType, preferences, metadata = {}) {
     }
   }
 
+  // Live Activity: opt-in by nature (token only exists if user started one)
+  const LIVE_ACTIVITY_EVENTS = new Set([
+    'haul.booking.crew_en_route_pickup',
+    'haul.booking.in_progress_pickup',
+    'haul.booking.crew_en_route_dropoff',
+    'haul.booking.in_progress_dropoff',
+    'haul.booking.pending_confirmation',
+  ]);
+  if (LIVE_ACTIVITY_EVENTS.has(eventType)) {
+    channels.push('live_activity');
+  }
+
   return channels;
 }
 
@@ -1475,7 +1488,8 @@ async function enqueueToChannel(channel, userId, event, notificationId, timestam
   const queueUrls = {
     email: EMAIL_QUEUE_URL,
     push: PUSH_QUEUE_URL,
-    sms: SMS_QUEUE_URL
+    sms: SMS_QUEUE_URL,
+    live_activity: LIVE_ACTIVITY_QUEUE_URL
   };
 
   const queueUrl = queueUrls[channel];

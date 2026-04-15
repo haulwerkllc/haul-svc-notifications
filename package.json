@@ -19,6 +19,7 @@
     "@aws-sdk/client-eventbridge": "^3.948.0",
     "@aws-sdk/client-pinpoint": "^3.1027.0",
     "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.962.0",
+    "@aws-sdk/client-secrets-manager": "^3.1030.0",
     "@aws-sdk/client-sesv2": "^3.962.0",
     "@aws-sdk/client-sqs": "^3.948.0",
     "@aws-sdk/client-ssm": "^3.1024.0",

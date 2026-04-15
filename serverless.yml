@@ -102,9 +102,18 @@ provider:
               - ec2:AssignPrivateIpAddresses
               - ec2:UnassignPrivateIpAddresses
             Resource: '*'
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource:
+              - arn:aws:secretsmanager:${aws:region}:${aws:accountId}:secret:haul/apns/*
 
 custom: 
   env: ${file(env.${sls:stage}.json)}
+  haulBundleId:
+    dev: com.haulwerk.haul.dev
+    stage: com.haulwerk.haul.stage
+    main: com.haulwerk.haul
   prune:
     automatic: true
     number: 5
@@ -119,6 +128,7 @@ functions:
   - ${file(./functions/channels/push/serverless.yml)}
   - ${file(./functions/channels/sms/serverless.yml)}
   - ${file(./functions/channels/admin/serverless.yml)}
+  - ${file(./functions/channels/live-activity/serverless.yml)}
 
 resources:
   - ${file(./resources/eventbridge.yml)}

@@ -69,5 +69,8 @@ Resources:
               - Fn::GetAtt:
                   - SmsChannelQueue
                   - Arn
+              - Fn::GetAtt:
+                  - LiveActivityChannelQueue
+                  - Arn
       Roles:
         - Ref: IamRoleLambdaExecution

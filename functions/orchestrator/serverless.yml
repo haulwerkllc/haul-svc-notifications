@@ -18,3 +18,5 @@ notificationsOrchestrator:
       Ref: SmsChannelQueue
     ADMIN_QUEUE_URL:
       Ref: AdminChannelQueue
+    LIVE_ACTIVITY_QUEUE_URL:
+      Ref: LiveActivityChannelQueue
