@@ -191,6 +191,7 @@ async function sendLiveActivityUpdate(message) {
 
 function buildStartPayload(message, contentState) {
   const { entity_id: bookingId, data = {}, context = {} } = message;
+  const providerName = context.company_name || data.company_name || 'Your crew';
 
   return {
     aps: {
@@ -204,6 +205,10 @@ function buildStartPayload(message, contentState) {
         vehicleType: context.job_type || data.job_type || '',
         driverName: context.driver_given_name || context.driver_name || data.driver_name || '',
         driverImageUrl: context.driver_profile_photo_url || data.driver_profile_photo_url || '',
+      },
+      'alert': {
+        title: 'Your haul is on the way',
+        body: `${providerName} is en route to your pickup`,
       },
     }
   };
