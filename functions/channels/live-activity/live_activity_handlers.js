@@ -75,19 +75,31 @@ async function sendLiveActivityUpdate(message) {
   const contentState = buildContentState(message);
   const isEndEvent = contentState.status === 'COMPLETED';
 
-  // Tier 2: fall back to push-to-start token (iOS 17.2+ — start LA remotely).
-  // PTS tokens can only be used to start an activity, not to update or end one.
+  // Tier 2: push-to-start fallback — only valid for the first booking event.
+  // Subsequent update events that arrive before LA_TOKEN is registered (race
+  // window after push-to-start wake) must be skipped, not re-sent as START:
+  // iOS silently ignores a second push-to-start for an already-running activity.
   if (!token && !isEndEvent) {
-    const ptsResult = await docClient.send(new GetCommand({
-      TableName: DEVICE_ENDPOINT_TABLE,
-      Key: { pk: `USER#${user_id}`, sk: 'PTS_TOKEN#ios' }
-    }));
-    token = ptsResult.Item?.token;
-    isPushToStart = !!token;
+    const isPushToStartEligible =
+      event_type === 'haul.booking.crew_en_route_pickup' &&
+      !laResult.Item;
+    if (isPushToStartEligible) {
+      const ptsResult = await docClient.send(new GetCommand({
+        TableName: DEVICE_ENDPOINT_TABLE,
+        Key: { pk: `USER#${user_id}`, sk: 'PTS_TOKEN#ios' }
+      }));
+      token = ptsResult.Item?.token;
+      isPushToStart = !!token;
+    }
   }
 
   if (!token) {
-    console.log('[LiveActivityChannel] No LA or PTS token found, skipping', { user_id, bookingId });
+    const reason = isEndEvent
+      ? 'no LA_TOKEN for end event'
+      : event_type === 'haul.booking.crew_en_route_pickup'
+        ? 'no PTS_TOKEN available'
+        : 'LA_TOKEN not yet registered (race window — update skipped)';
+    console.warn('[LiveActivityChannel] Skipping — no token available', { user_id, bookingId, event_type, reason });
     return;
   }
 
@@ -101,6 +113,14 @@ async function sendLiveActivityUpdate(message) {
   }
 
   const mode = isPushToStart ? 'start' : isEndEvent ? 'end' : 'update';
+  console.log('[LiveActivityChannel] Token resolved', {
+    user_id,
+    bookingId,
+    event_type,
+    tokenType: isPushToStart ? 'PTS' : 'LA',
+    fallback: isPushToStart && event_type !== 'haul.booking.crew_en_route_pickup',
+    token_prefix: token.slice(0, 16),
+  });
   console.log('[LiveActivityChannel] Sending APNs', {
     user_id, bookingId, event_type, mode,
     token_prefix: token.slice(0, 16),
@@ -111,7 +131,8 @@ async function sendLiveActivityUpdate(message) {
   const topic = `${BUNDLE_ID}.push-type.liveactivity`;
 
   try {
-    const statusCode = await sendApnsRequest(token, payload, jwt, topic);
+    const sendOptions = isPushToStart ? { expiration: Math.floor(Date.now() / 1000) + 300 } : {};
+    const statusCode = await sendApnsRequest(token, payload, jwt, topic, sendOptions);
 
     if (statusCode === 410) {
       const sk = isPushToStart ? 'PTS_TOKEN#ios' : `LA_TOKEN#${bookingId}`;
@@ -120,6 +141,33 @@ async function sendLiveActivityUpdate(message) {
         TableName: DEVICE_ENDPOINT_TABLE,
         Key: { pk: `USER#${user_id}`, sk }
       }));
+
+      // If the expired token was an LA update token (not already a PTS attempt, not an end event),
+      // fall back to push-to-start so the Live Activity can be restarted remotely.
+      if (!isPushToStart && !isEndEvent) {
+        const ptsResult = await docClient.send(new GetCommand({
+          TableName: DEVICE_ENDPOINT_TABLE,
+          Key: { pk: `USER#${user_id}`, sk: 'PTS_TOKEN#ios' }
+        }));
+        const ptsToken = ptsResult.Item?.token;
+        if (ptsToken) {
+          console.log('[LiveActivityChannel] LA token expired — retrying as push-to-start', { user_id, bookingId });
+          const startPayload = buildStartPayload(message, contentState);
+          const startStatusCode = await sendApnsRequest(ptsToken, startPayload, jwt, topic, { expiration: Math.floor(Date.now() / 1000) + 300 });
+          if (startStatusCode === 410) {
+            console.log('[LiveActivityChannel] PTS token also expired (410), cleaning up', { user_id, bookingId });
+            await docClient.send(new DeleteCommand({
+              TableName: DEVICE_ENDPOINT_TABLE,
+              Key: { pk: `USER#${user_id}`, sk: 'PTS_TOKEN#ios' }
+            }));
+          } else if (startStatusCode !== 200) {
+            console.warn('[LiveActivityChannel] Push-to-start fallback returned non-200', { startStatusCode, user_id, bookingId });
+          } else {
+            console.log('[LiveActivityChannel] Push-to-start fallback sent successfully', { user_id, bookingId });
+          }
+        }
+      }
+
       return;
     }
 
@@ -155,7 +203,7 @@ function buildStartPayload(message, contentState) {
         providerName: context.company_name || data.company_name || '',
         vehicleType: context.job_type || data.job_type || '',
         driverName: context.driver_given_name || context.driver_name || data.driver_name || '',
-        driverImageUrl: context.driver_profile_photo_url || data.driver_profile_photo_url || null,
+        driverImageUrl: context.driver_profile_photo_url || data.driver_profile_photo_url || '',
       },
     }
   };
@@ -209,10 +257,13 @@ function buildContentState(message) {
   }
 
   return {
-    status,
-    etaMinutes,
-    stopType,
-    stops,
+    status: String(status),
+    etaMinutes: etaMinutes == null ? null : Number(etaMinutes),
+    stopType: String(stopType),
+    stops: stops.map(s => ({
+      type: String(s.type),
+      status: String(s.status),
+    })),
   };
 }
 
@@ -255,7 +306,7 @@ async function getApnsJwt() {
   return cachedJwt;
 }
 
-function sendApnsRequest(deviceToken, payload, jwt, topic) {
+function sendApnsRequest(deviceToken, payload, jwt, topic, options = {}) {
   return new Promise((resolve, reject) => {
     const session = http2.connect(`https://${APNS_HOST}`);
 
@@ -265,7 +316,7 @@ function sendApnsRequest(deviceToken, payload, jwt, topic) {
     });
 
     const body = JSON.stringify(payload);
-    const req = session.request({
+    const headers = {
       ':method': 'POST',
       ':path': `/3/device/${deviceToken}`,
       'authorization': `bearer ${jwt}`,
@@ -274,13 +325,34 @@ function sendApnsRequest(deviceToken, payload, jwt, topic) {
       'apns-priority': '10',
       'content-type': 'application/json',
       'content-length': Buffer.byteLength(body),
+    };
+
+    if (options.expiration != null) {
+      headers['apns-expiration'] = options.expiration;
+    }
+
+    console.log('[LiveActivityChannel] APNs preflight', {
+      host: APNS_HOST,
+      token_prefix: deviceToken.slice(0, 16),
+      token_length: deviceToken.length,
+      headers: {
+        'apns-push-type': headers['apns-push-type'],
+        'apns-topic': headers['apns-topic'],
+        'apns-priority': headers['apns-priority'],
+        'apns-expiration': headers['apns-expiration'] ?? '(not set)',
+        'content-length': headers['content-length'],
+        authorization_prefix: `bearer ${jwt.slice(0, 20)}…`,
+      },
+      payload,
     });
+
+    const req = session.request(headers);
 
     let statusCode;
     let responseBody = '';
 
-    req.on('response', (headers) => {
-      statusCode = headers[':status'];
+    req.on('response', (responseHeaders) => {
+      statusCode = responseHeaders[':status'];
     });
 
     req.on('data', (chunk) => {
@@ -297,6 +369,12 @@ function sendApnsRequest(deviceToken, payload, jwt, topic) {
           console.warn('[LiveActivityChannel] APNs error body', { statusCode, responseBody });
         }
       }
+      console.log('[LiveActivityChannel] APNs response', {
+        statusCode,
+        token_prefix: deviceToken.slice(0, 16),
+        'apns-push-type': headers['apns-push-type'],
+        'apns-topic': headers['apns-topic'],
+      });
       resolve(statusCode);
     });
 
