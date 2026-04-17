@@ -73,7 +73,7 @@ async function sendLiveActivityUpdate(message) {
   let isPushToStart = false;
 
   const contentState = buildContentState(message);
-  const isEndEvent = contentState.status === 'COMPLETED';
+  const isEndEvent = contentState.status === 'PENDING_CONFIRMATION';
 
   // Tier 2: push-to-start fallback — only valid for the first booking event.
   // Subsequent update events that arrive before LA_TOKEN is registered (race
@@ -204,7 +204,6 @@ function buildStartPayload(message, contentState) {
         providerName: context.company_name || data.company_name || '',
         vehicleType: context.job_type || data.job_type || '',
         driverName: context.driver_given_name || context.driver_name || data.driver_name || '',
-        driverImageUrl: context.driver_profile_photo_url || data.driver_profile_photo_url || '',
       },
       'alert': {
         title: 'Your haul is on the way',
@@ -222,13 +221,15 @@ function buildEndPayload() {
       event: 'end',
       'dismissal-date': now + 300,
       'content-state': {
-        status: 'COMPLETED',
+        status: 'PENDING_CONFIRMATION',
         etaMinutes: null,
         stopType: 'DROPOFF',
         stops: [
           { type: 'PICKUP', status: 'COMPLETED' },
           { type: 'DROPOFF', status: 'COMPLETED' },
         ],
+        driverImageUrl: null,
+        companyLogoUrl: null,
       },
     }
   };
@@ -238,14 +239,14 @@ function buildContentState(message) {
   const { event_type, data = {}, context = {} } = message;
 
   const STATUS_MAP = {
-    'haul.booking.crew_en_route_pickup': 'EN_ROUTE_PICKUP',
+    'haul.booking.crew_en_route_pickup': 'CREW_EN_ROUTE_PICKUP',
     'haul.booking.in_progress_pickup': 'IN_PROGRESS_PICKUP',
-    'haul.booking.crew_en_route_dropoff': 'EN_ROUTE_DROPOFF',
+    'haul.booking.crew_en_route_dropoff': 'CREW_EN_ROUTE_DROPOFF',
     'haul.booking.in_progress_dropoff': 'IN_PROGRESS_DROPOFF',
-    'haul.booking.pending_confirmation': 'COMPLETED',
+    'haul.booking.pending_confirmation': 'PENDING_CONFIRMATION',
   };
 
-  const status = STATUS_MAP[event_type] || 'EN_ROUTE_PICKUP';
+  const status = STATUS_MAP[event_type] || 'CREW_EN_ROUTE_PICKUP';
   const etaMinutes = data.eta_minutes ?? context.eta_minutes ?? null;
   const isDropoff = status.includes('DROPOFF');
   const stopType = isDropoff ? 'DROPOFF' : 'PICKUP';
@@ -254,12 +255,15 @@ function buildContentState(message) {
   if (context.stops) {
     stops.push(...context.stops);
   } else {
-    const pickupDone = ['IN_PROGRESS_PICKUP', 'EN_ROUTE_DROPOFF', 'IN_PROGRESS_DROPOFF'].includes(status);
+    const pickupDone = ['IN_PROGRESS_PICKUP', 'CREW_EN_ROUTE_DROPOFF', 'IN_PROGRESS_DROPOFF', 'PENDING_CONFIRMATION'].includes(status);
     stops.push(
       { type: 'PICKUP', status: pickupDone ? 'COMPLETED' : 'CURRENT' },
       { type: 'DROPOFF', status: isDropoff ? 'CURRENT' : 'UPCOMING' }
     );
   }
+
+  const driverImageUrl = context.driver_profile_photo_url || data.driver_profile_photo_url || null;
+  const companyLogoUrl = context.icon_url || data.icon_url || null;
 
   return {
     status: String(status),
@@ -269,6 +273,8 @@ function buildContentState(message) {
       type: String(s.type),
       status: String(s.status),
     })),
+    driverImageUrl: driverImageUrl ? String(driverImageUrl) : null,
+    companyLogoUrl: companyLogoUrl ? String(companyLogoUrl) : null,
   };
 }
 
