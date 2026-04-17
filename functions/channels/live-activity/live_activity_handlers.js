@@ -107,7 +107,7 @@ async function sendLiveActivityUpdate(message) {
   if (isPushToStart) {
     payload = buildStartPayload(message, contentState);
   } else if (isEndEvent) {
-    payload = buildEndPayload();
+    payload = buildEndPayload(message);
   } else {
     payload = { aps: { timestamp: Math.floor(Date.now() / 1000), event: 'update', 'content-state': contentState } };
   }
@@ -189,6 +189,15 @@ async function sendLiveActivityUpdate(message) {
   }
 }
 
+function normalizeJobType(s) {
+  return String(s || '')
+    .toLowerCase()
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 function buildStartPayload(message, contentState) {
   const { entity_id: bookingId, data = {}, context = {} } = message;
   const providerName = context.company_name || data.company_name || 'Your crew';
@@ -202,7 +211,7 @@ function buildStartPayload(message, contentState) {
       'attributes': {
         bookingId,
         providerName: context.company_name || data.company_name || '',
-        vehicleType: context.job_type || data.job_type || '',
+        vehicleType: normalizeJobType(context.job_type || data.job_type || ''),
         driverName: context.driver_given_name || context.driver_name || data.driver_name || '',
       },
       'alert': {
@@ -213,8 +222,12 @@ function buildStartPayload(message, contentState) {
   };
 }
 
-function buildEndPayload() {
+function buildEndPayload(message) {
   const now = Math.floor(Date.now() / 1000);
+  const ctx = message?.context || {};
+  const data = message?.data || {};
+  const driverImageUrl = ctx.driver_profile_photo_url || data.driver_profile_photo_url || null;
+  const companyLogoUrl = ctx.icon_url || data.icon_url || null;
   return {
     aps: {
       timestamp: now,
@@ -228,8 +241,8 @@ function buildEndPayload() {
           { type: 'PICKUP', status: 'COMPLETED' },
           { type: 'DROPOFF', status: 'COMPLETED' },
         ],
-        driverImageUrl: null,
-        companyLogoUrl: null,
+        driverImageUrl: driverImageUrl ? String(driverImageUrl) : null,
+        companyLogoUrl: companyLogoUrl ? String(companyLogoUrl) : null,
       },
     }
   };
@@ -251,16 +264,15 @@ function buildContentState(message) {
   const isDropoff = status.includes('DROPOFF');
   const stopType = isDropoff ? 'DROPOFF' : 'PICKUP';
 
-  const stops = [];
-  if (context.stops) {
-    stops.push(...context.stops);
-  } else {
-    const pickupDone = ['IN_PROGRESS_PICKUP', 'CREW_EN_ROUTE_DROPOFF', 'IN_PROGRESS_DROPOFF', 'PENDING_CONFIRMATION'].includes(status);
-    stops.push(
-      { type: 'PICKUP', status: pickupDone ? 'COMPLETED' : 'CURRENT' },
-      { type: 'DROPOFF', status: isDropoff ? 'CURRENT' : 'UPCOMING' }
-    );
-  }
+  // Always derive stops from status. Incoming context.stops are the job's stops
+  // (shape `{ stop_type, ...address }`) which the widget cannot interpret — it
+  // expects `{ type: 'PICKUP'|'DROPOFF', status: 'CURRENT'|'COMPLETED'|'UPCOMING' }`.
+  const pickupDone = ['IN_PROGRESS_PICKUP', 'CREW_EN_ROUTE_DROPOFF', 'IN_PROGRESS_DROPOFF', 'PENDING_CONFIRMATION'].includes(status);
+  const dropoffDone = status === 'PENDING_CONFIRMATION';
+  const stops = [
+    { type: 'PICKUP', status: pickupDone ? 'COMPLETED' : 'CURRENT' },
+    { type: 'DROPOFF', status: dropoffDone ? 'COMPLETED' : (isDropoff ? 'CURRENT' : 'UPCOMING') },
+  ];
 
   const driverImageUrl = context.driver_profile_photo_url || data.driver_profile_photo_url || null;
   const companyLogoUrl = context.icon_url || data.icon_url || null;
