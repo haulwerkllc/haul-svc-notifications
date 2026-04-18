@@ -259,7 +259,9 @@ function buildContentState(message) {
     'haul.booking.pending_confirmation': 'PENDING_CONFIRMATION',
   };
 
-  const status = STATUS_MAP[event_type] || 'CREW_EN_ROUTE_PICKUP';
+  const status = event_type === 'haul.booking.eta_update'
+    ? (context.status || data.status || 'CREW_EN_ROUTE_PICKUP')
+    : (STATUS_MAP[event_type] || 'CREW_EN_ROUTE_PICKUP');
   const etaMinutes = data.eta_minutes ?? context.eta_minutes ?? null;
   const isDropoff = status.includes('DROPOFF');
   const stopType = isDropoff ? 'DROPOFF' : 'PICKUP';

@@ -27,6 +27,7 @@ const VALID_EVENT_TYPES = [
   'haul.payment.captured',
   'haul.payout.sent',
   'haul.message.created',
+  'haul.booking.eta_update',
 ];
 
 /**

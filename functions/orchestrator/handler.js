@@ -272,6 +272,14 @@ async function constructNotificationContent(event) {
 
     case 'haul.message.created':
       return constructMessageCreatedNotification(event);
+
+    case 'haul.booking.eta_update':
+      return {
+        subject: 'ETA update',
+        body: '',
+        entity: { id: event.entity.id, type: 'booking' },
+        data: event.context || {}
+      };
     
     default:
       console.warn('[Orchestrator] No content constructor for event type', { event_type });
@@ -1383,13 +1391,17 @@ function determineEnabledChannels(eventType, preferences, metadata = {}) {
     'haul.booking.crew_en_route_dropoff', // push only
     'haul.booking.in_progress_dropoff',   // push only
     'haul.booking.pending_confirmation',  // push only
+    'haul.booking.eta_update',            // live_activity only
   ];
   if (preferences.channels?.email !== false && !emailSuppressedEvents.includes(eventType)) {
     channels.push('email');
   }
 
   // Push: must be explicitly enabled (Phase 2)
-  if (preferences.channels?.push === true) {
+  const pushSuppressedEvents = [
+    'haul.booking.eta_update', // live_activity only
+  ];
+  if (preferences.channels?.push === true && !pushSuppressedEvents.includes(eventType)) {
     channels.push('push');
   }
 
@@ -1414,6 +1426,7 @@ function determineEnabledChannels(eventType, preferences, metadata = {}) {
     'haul.booking.crew_en_route_dropoff',
     'haul.booking.in_progress_dropoff',
     'haul.booking.pending_confirmation',
+    'haul.booking.eta_update',
   ]);
   if (LIVE_ACTIVITY_EVENTS.has(eventType)) {
     channels.push('live_activity');
