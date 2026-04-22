@@ -1,5 +1,5 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand, BatchGetCommand } = require('@aws-sdk/lib-dynamodb');
 const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
 const { validateNotificationEvent } = require('../../utils/schema');
 const { getResolver } = require('./resolvers/registry');
@@ -16,6 +16,7 @@ const NOTIFICATION_INBOX_TABLE = process.env.NOTIFICATION_INBOX_TABLE_NAME;
 const JOB_TABLE = process.env.JOB_TABLE_NAME;
 const BID_TABLE = process.env.BID_TABLE_NAME;
 const COMPANY_TABLE = process.env.COMPANY_TABLE_NAME;
+const USER_TABLE = process.env.USER_TABLE_NAME;
 const MEDIA_BASE_URL = process.env.MEDIA_BASE_URL;
 const EMAIL_QUEUE_URL = process.env.EMAIL_QUEUE_URL;
 const PUSH_QUEUE_URL = process.env.PUSH_QUEUE_URL;
@@ -70,18 +71,43 @@ exports.handler = async (event) => {
       };
     }
 
-    const recipients = await resolver.resolve(notificationEvent);
+    let recipients = await resolver.resolve(notificationEvent);
     console.log('[Orchestrator] Recipients resolved', {
       event_id: notificationEvent.event_id,
       count: recipients.length
     });
 
+    // Test account isolation: when the originating event is from a test account,
+    // filter recipients so only other test accounts receive notifications.
+    // This prevents App Store review activity from reaching real company users/dispatchers.
+    if (notificationEvent.is_test && recipients.length > 0) {
+      const userIds = recipients.map(r => r.user_id);
+      const testFlags = await batchGetUsersIsTestAccount(userIds);
+      const originalCount = recipients.length;
+      recipients = recipients.filter(r => testFlags[r.user_id] === true);
+      console.log('[Orchestrator] Test account isolation applied', {
+        event_id: notificationEvent.event_id,
+        original_count: originalCount,
+        filtered_count: recipients.length,
+      });
+    }
+
     // Check admin routing mode
     const isAdminOnly = notificationEvent.recipients?.admin_only === true;
     const isAdminEligible = isAdminEligibleEvent(notificationEvent.event_type);
 
-    // Admin-only mode: skip user routing, send only to admin
+    // Admin-only mode: skip user routing, send only to admin — skip entirely for test account events
     if (isAdminOnly) {
+      if (notificationEvent.is_test) {
+        console.log('[Orchestrator] Admin-only event suppressed (test account)', {
+          event_id: notificationEvent.event_id,
+          event_type: notificationEvent.event_type,
+        });
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ message: 'Admin-only notification suppressed (test account)', event_id: notificationEvent.event_id }),
+        };
+      }
       console.log('[Orchestrator] Admin-only event, skipping user routing', {
         event_id: notificationEvent.event_id,
         event_type: notificationEvent.event_type
@@ -100,8 +126,8 @@ exports.handler = async (event) => {
 
     if (recipients.length === 0) {
       console.info('[Orchestrator] No recipients to notify (resolver returned empty list)');
-      // Still send to admin if eligible, even with no user recipients
-      if (isAdminEligible) {
+      // Still send to admin if eligible and not a test event
+      if (isAdminEligible && !notificationEvent.is_test) {
         const notificationContent = await constructNotificationContent(notificationEvent);
         await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
       }
@@ -116,8 +142,8 @@ exports.handler = async (event) => {
       await processRecipient(recipient, notificationEvent);
     }
 
-    // Dual routing: also send to admin if event is eligible
-    if (isAdminEligible) {
+    // Dual routing: also send to admin if event is eligible — skip for test account events
+    if (isAdminEligible && !notificationEvent.is_test) {
       console.log('[Orchestrator] Event is admin-eligible, routing to admin channel', {
         event_id: notificationEvent.event_id,
         event_type: notificationEvent.event_type
@@ -1547,6 +1573,45 @@ async function enqueueToChannel(channel, userId, event, notificationId, timestam
     });
     throw error;
   }
+}
+
+/**
+ * Batch-get the is_test_account flag for a list of user IDs.
+ * Returns a map of { [userId]: boolean }.
+ * DynamoDB BatchGetItem is limited to 100 keys per request; we chunk as needed.
+ */
+async function batchGetUsersIsTestAccount(userIds) {
+  const result = {};
+  if (!userIds || userIds.length === 0) return result;
+
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < userIds.length; i += CHUNK_SIZE) {
+    const chunk = userIds.slice(i, i + CHUNK_SIZE);
+    try {
+      const response = await docClient.send(new BatchGetCommand({
+        RequestItems: {
+          [USER_TABLE]: {
+            Keys: chunk.map(id => ({ id })),
+            ProjectionExpression: 'id, is_test_account',
+          },
+        },
+      }));
+      const items = response.Responses?.[USER_TABLE] || [];
+      for (const item of items) {
+        result[item.id] = item.is_test_account === true;
+      }
+    } catch (err) {
+      console.error('[Orchestrator] Failed to batch-get user is_test_account flags', {
+        error: err.message,
+        userIds: chunk,
+      });
+      // On error, conservatively treat all users as non-test (do not notify them for test events)
+      for (const id of chunk) {
+        if (!(id in result)) result[id] = false;
+      }
+    }
+  }
+  return result;
 }
 
 /**
