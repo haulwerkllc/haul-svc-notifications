@@ -227,7 +227,7 @@ function buildEndPayload(message) {
   const ctx = message?.context || {};
   const data = message?.data || {};
   const driverImageUrl = ctx.driver_profile_photo_url || data.driver_profile_photo_url || null;
-  const companyLogoUrl = ctx.icon_url || data.icon_url || null;
+  const companyLogoUrl = ctx.icon_url_dark || data.icon_url_dark || null;
   return {
     aps: {
       timestamp: now,
@@ -277,7 +277,7 @@ function buildContentState(message) {
   ];
 
   const driverImageUrl = context.driver_profile_photo_url || data.driver_profile_photo_url || null;
-  const companyLogoUrl = context.icon_url || data.icon_url || null;
+  const companyLogoUrl = context.icon_url_dark || data.icon_url_dark || null;
 
   return {
     status: String(status),
