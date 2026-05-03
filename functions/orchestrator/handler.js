@@ -1,6 +1,14 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand, BatchGetCommand } = require('@aws-sdk/lib-dynamodb');
 const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
+const { Client } = require('@opensearch-project/opensearch');
+const { AwsSigv4Signer } = require('@opensearch-project/opensearch/aws');
+const { defaultProvider } = require('@aws-sdk/credential-provider-node');
+const {
+  buildResolverCoarseServiceAreasQuery,
+  normalizeServiceAreaType,
+  isValidGeoShapeGeometry,
+} = require('../../utils/service-area-geo-query');
 const { validateNotificationEvent } = require('../../utils/schema');
 const { getResolver } = require('./resolvers/registry');
 const { isAdminEligibleEvent } = require('./admin-event-registry');
@@ -24,6 +32,26 @@ const SMS_QUEUE_URL = process.env.SMS_QUEUE_URL;
 const ADMIN_QUEUE_URL = process.env.ADMIN_QUEUE_URL;
 const LIVE_ACTIVITY_QUEUE_URL = process.env.LIVE_ACTIVITY_QUEUE_URL;
 const JOB_AVAILABLE_QUEUE_URL = process.env.JOB_AVAILABLE_QUEUE_URL;
+const JOB_REMOVED_QUEUE_URL = process.env.JOB_REMOVED_QUEUE_URL;
+
+const OPENSEARCH_ENDPOINT = process.env.OPENSEARCH_ENDPOINT?.startsWith('https://')
+  ? process.env.OPENSEARCH_ENDPOINT
+  : `https://${process.env.OPENSEARCH_ENDPOINT}`;
+
+let _openSearchClient = null;
+function getOpenSearchClient() {
+  if (!_openSearchClient) {
+    _openSearchClient = new Client({
+      ...AwsSigv4Signer({
+        region: process.env.REGION,
+        service: 'es',
+        getCredentials: () => defaultProvider()(),
+      }),
+      node: OPENSEARCH_ENDPOINT,
+    });
+  }
+  return _openSearchClient;
+}
 
 /**
  * Notifications Orchestrator Lambda
@@ -132,6 +160,12 @@ exports.handler = async (event) => {
         const notificationContent = await constructNotificationContent(notificationEvent);
         await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
       }
+      // Still fan out the WS job.removed signal even when there are no notification recipients
+      // (e.g. job canceled before any bids — no push/email to send, but dispatchers must still
+      // see the removal from their available jobs list).
+      if (notificationEvent.event_type === 'haul.job.canceled' && !notificationEvent.is_test) {
+        await sendJobRemovedMessages(notificationEvent.entity.id);
+      }
       return {
         statusCode: 200,
         body: JSON.stringify({ message: 'No recipients', skipped: true })
@@ -150,6 +184,13 @@ exports.handler = async (event) => {
         recipients.map(r => r.metadata?.company_id).filter(Boolean)
       )];
       await sendJobAvailableMessages(notificationEvent.entity.id, uniqueCompanyIds);
+    }
+
+    // For job.canceled events, fan out a targeted job.removed WS signal to every
+    // company whose service area contains the job's pickup location — so all
+    // dispatchers browsing available jobs see the removal instantly, not just bidders.
+    if (notificationEvent.event_type === 'haul.job.canceled' && !notificationEvent.is_test) {
+      await sendJobRemovedMessages(notificationEvent.entity.id);
     }
 
     // Dual routing: also send to admin if event is eligible — skip for test account events
@@ -1704,6 +1745,99 @@ async function sendJobAvailableMessages(jobId, companyIds) {
     });
   } catch (error) {
     console.error('[Orchestrator] Failed to send job-available SQS messages', {
+      job_id: jobId,
+      error: error.message,
+    });
+    // Non-fatal — do not rethrow
+  }
+}
+
+/**
+ * Send one SQS message per company for haul.job.canceled so the realtime service
+ * can fan out a `job.removed` WebSocket message to all dispatchers in the service area.
+ *
+ * Unlike the notification resolver (which only targets bidding companies), this performs
+ * the same OpenSearch geo-query as job_posted_resolver to find ALL companies whose
+ * service area contains the canceled job's pickup location. This ensures every dispatcher
+ * browsing available jobs sees the removal instantly — not just those who bid.
+ *
+ * Failures are non-fatal — the 2-minute poll in the portal acts as a safety net.
+ */
+async function sendJobRemovedMessages(jobId) {
+  if (!JOB_REMOVED_QUEUE_URL) return;
+
+  try {
+    const job = await loadJobData(jobId);
+    if (!job) {
+      console.warn('[Orchestrator] sendJobRemovedMessages: job not found', { job_id: jobId });
+      return;
+    }
+
+    const pickupStop = job.stops?.find(s => s.stop_type === 'PICKUP') || job.stops?.[0];
+    const lat = pickupStop?.location?.lat;
+    const lon = pickupStop?.location?.lon;
+
+    if (typeof lat !== 'number' || typeof lon !== 'number') {
+      console.warn('[Orchestrator] sendJobRemovedMessages: no pickup lat/lon', { job_id: jobId });
+      return;
+    }
+
+    const osClient = getOpenSearchClient();
+    const response = await osClient.search({
+      index: 'service_areas',
+      body: {
+        query: buildResolverCoarseServiceAreasQuery(lat, lon),
+        size: 100,
+      },
+    });
+
+    const hits = response.body.hits.hits || [];
+    const matchingAreas = hits
+      .map(h => h._source)
+      .filter(sa => {
+        const t = normalizeServiceAreaType(sa.type);
+        if (t === 'polygon' || t === 'municipality') {
+          return isValidGeoShapeGeometry(sa.geometry);
+        }
+        if (
+          typeof sa.center?.lat !== 'number' ||
+          typeof sa.center?.lon !== 'number' ||
+          typeof sa.radius_km !== 'number' ||
+          sa.radius_km <= 0
+        ) return false;
+
+        const dLat = ((sa.center.lat - lat) * Math.PI) / 180;
+        const dLon = ((sa.center.lon - lon) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat * Math.PI) / 180) *
+            Math.cos((sa.center.lat * Math.PI) / 180) *
+            Math.sin(dLon / 2) ** 2;
+        const distanceKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return distanceKm <= sa.radius_km;
+      });
+
+    const companyIds = [...new Set(matchingAreas.map(sa => sa.company_id).filter(Boolean))];
+
+    if (companyIds.length === 0) {
+      console.log('[Orchestrator] sendJobRemovedMessages: no companies in service area', { job_id: jobId });
+      return;
+    }
+
+    const sends = companyIds.map(companyId =>
+      sqsClient.send(new SendMessageCommand({
+        QueueUrl: JOB_REMOVED_QUEUE_URL,
+        MessageBody: JSON.stringify({ company_id: companyId, job_id: jobId }),
+      }))
+    );
+
+    await Promise.all(sends);
+    console.log('[Orchestrator] Sent job-removed SQS messages', {
+      job_id: jobId,
+      company_count: companyIds.length,
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Failed to send job-removed SQS messages', {
       job_id: jobId,
       error: error.message,
     });

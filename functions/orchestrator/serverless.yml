@@ -21,3 +21,4 @@ notificationsOrchestrator:
     LIVE_ACTIVITY_QUEUE_URL:
       Ref: LiveActivityChannelQueue
     JOB_AVAILABLE_QUEUE_URL: https://sqs.${aws:region}.amazonaws.com/${aws:accountId}/haul-realtime-job-available-${sls:stage}
+    JOB_REMOVED_QUEUE_URL: https://sqs.${aws:region}.amazonaws.com/${aws:accountId}/haul-realtime-job-removed-${sls:stage}
