@@ -23,6 +23,7 @@ const PUSH_QUEUE_URL = process.env.PUSH_QUEUE_URL;
 const SMS_QUEUE_URL = process.env.SMS_QUEUE_URL;
 const ADMIN_QUEUE_URL = process.env.ADMIN_QUEUE_URL;
 const LIVE_ACTIVITY_QUEUE_URL = process.env.LIVE_ACTIVITY_QUEUE_URL;
+const JOB_AVAILABLE_QUEUE_URL = process.env.JOB_AVAILABLE_QUEUE_URL;
 
 /**
  * Notifications Orchestrator Lambda
@@ -140,6 +141,15 @@ exports.handler = async (event) => {
     // Process each recipient (standard user routing)
     for (const recipient of recipients) {
       await processRecipient(recipient, notificationEvent);
+    }
+
+    // For job.posted events, fan out a per-company WebSocket signal so connected
+    // dispatchers get an in-session badge without polling.
+    if (notificationEvent.event_type === 'haul.job.posted' && recipients.length > 0 && !notificationEvent.is_test) {
+      const uniqueCompanyIds = [...new Set(
+        recipients.map(r => r.metadata?.company_id).filter(Boolean)
+      )];
+      await sendJobAvailableMessages(notificationEvent.entity.id, uniqueCompanyIds);
     }
 
     // Dual routing: also send to admin if event is eligible — skip for test account events
@@ -1493,7 +1503,8 @@ async function writeToInbox(userId, event, channels, notificationContent) {
     read: false,
     context: event.context || {},
     gsi1pk: `USER#${userId}`,
-    gsi1sk: `UNREAD#${timestamp}`
+    gsi1sk: `UNREAD#${timestamp}`,
+    ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60
   };
 
   try {
@@ -1668,3 +1679,34 @@ async function enqueueToAdminChannel(event, resolvedRecipients, notificationCont
   }
 }
 
+/**
+ * Send one SQS message per company for haul.job.posted so the realtime
+ * service can fan out a `job.available` WebSocket message to connected dispatchers.
+ * Uses SQS (which has a VPC Interface Endpoint) instead of EventBridge (which does not).
+ * Failures are non-fatal — this is an enhancement, not a delivery requirement.
+ */
+async function sendJobAvailableMessages(jobId, companyIds) {
+  if (!companyIds || companyIds.length === 0) return;
+  if (!JOB_AVAILABLE_QUEUE_URL) return;
+
+  const sends = companyIds.map(companyId =>
+    sqsClient.send(new SendMessageCommand({
+      QueueUrl: JOB_AVAILABLE_QUEUE_URL,
+      MessageBody: JSON.stringify({ company_id: companyId, job_id: jobId }),
+    }))
+  );
+
+  try {
+    await Promise.all(sends);
+    console.log('[Orchestrator] Sent job-available SQS messages', {
+      job_id: jobId,
+      company_count: companyIds.length,
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Failed to send job-available SQS messages', {
+      job_id: jobId,
+      error: error.message,
+    });
+    // Non-fatal — do not rethrow
+  }
+}
