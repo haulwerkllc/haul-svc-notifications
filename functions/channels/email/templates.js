@@ -2028,6 +2028,92 @@ function buildEmailChangedNotification({ oldEmail, newEmail }) {
   };
 }
 
+/**
+ * Build booking rescheduled email for CUSTOMER
+ */
+function buildBookingRescheduledCustomerEmail(data) {
+  const bookingNumber = data.booking_number || 'N/A';
+  const companyName = data.company_name || 'your service provider';
+  const pickupStop = getPickupStop(data.stops);
+  const dropoffStop = getDropoffStop(data.stops);
+  const pickupAddress = formatAddress(pickupStop);
+  const dropoffAddress = dropoffStop ? formatAddress(dropoffStop) : null;
+  const timezone = pickupStop?.timezone || data.pickup_timezone;
+
+  const newPickupWindow = formatTimingPreference(
+    'SCHEDULED',
+    data.pickup_window_start,
+    data.pickup_window_end,
+    timezone
+  );
+
+  const subject = `Booking ${bookingNumber} has been rescheduled`;
+  const preheader = `${companyName} has updated your pickup window.`;
+
+  const bodyContent = `
+    <h1>Your pickup window has been updated</h1>
+    <p><strong>${escapeHtml(companyName)}</strong> has rescheduled your pickup window.</p>
+
+    <div style="margin: 24px 0;">
+      <div class="detail-row">
+        <span class="detail-label">Booking No.</span>
+        <span class="detail-value">${escapeHtml(bookingNumber)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Company</span>
+        <span class="detail-value">${escapeHtml(companyName)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Pickup</span>
+        <span class="detail-value">${escapeHtml(pickupAddress)}</span>
+      </div>
+      ${dropoffAddress ? `<div class="detail-row">
+        <span class="detail-label">Dropoff</span>
+        <span class="detail-value">${escapeHtml(dropoffAddress)}</span>
+      </div>` : ''}
+      <div class="detail-row">
+        <span class="detail-label">New pickup window</span>
+        <span class="detail-value">${escapeHtml(newPickupWindow)}</span>
+      </div>
+    </div>
+
+    <p>If you have questions about this change, message your service provider directly in the Haul app.</p>
+
+    <div class="cta">
+      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
+    </div>
+  `;
+
+  const textParts = [
+    `Booking ${bookingNumber} has been rescheduled`,
+    '',
+    `${companyName} has updated your pickup window.`,
+    '',
+    `Booking No.: ${bookingNumber}`,
+    `Company: ${companyName}`,
+    `Pickup: ${pickupAddress}`,
+    ...(dropoffAddress ? [`Dropoff: ${dropoffAddress}`] : []),
+    `New pickup window: ${newPickupWindow}`,
+    '',
+    'If you have questions about this change, message your service provider directly in the Haul app.',
+    '',
+    `View booking: ${BASE_URL}/bookings`,
+    '',
+    '---',
+    'You received this because your booking was rescheduled.',
+    `Manage preferences: ${BASE_URL}/user/preferences`,
+    `Need help? Contact us at ${SUPPORT_EMAIL}`,
+    '',
+    `© ${new Date().getFullYear()} Haulwerk, LLC`
+  ];
+
+  return {
+    subject,
+    html: buildConsumerTemplate({ subject, preheader, bodyContent }),
+    text: textParts.join('\n')
+  };
+}
+
 module.exports = {
   buildServiceProviderTemplate,
   buildConsumerTemplate,
@@ -2044,6 +2130,7 @@ module.exports = {
   buildBookingCompletedCustomerEmail,
   buildBookingCanceledProviderEmail,
   buildBookingCanceledCustomerEmail,
+  buildBookingRescheduledCustomerEmail,
   buildPaymentAuthorizationFailedEmail,
   buildPaymentCapturedEmail,
   buildPayoutSentEmail,

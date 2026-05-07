@@ -82,6 +82,7 @@ async function sendPushNotification(message) {
     'haul.booking.crew_en_route_dropoff',
     'haul.booking.in_progress_dropoff',
     'haul.booking.pending_confirmation',
+    'haul.booking.rescheduled',
   ]);
   const companyIconUrl = (
     message.metadata?.recipient_type === 'customer' &&

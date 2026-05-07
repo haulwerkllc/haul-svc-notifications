@@ -13,6 +13,7 @@ const {
   buildBookingCompletedCustomerEmail,
   buildBookingCanceledProviderEmail,
   buildBookingCanceledCustomerEmail,
+  buildBookingRescheduledCustomerEmail,
   buildPaymentAuthorizationFailedEmail,
   buildPaymentCapturedEmail,
   buildPayoutSentEmail
@@ -195,6 +196,9 @@ function renderEmailTemplate(eventType, data) {
         return buildBookingCanceledProviderEmail(data);
       }
       return buildBookingCanceledCustomerEmail(data);
+
+    case 'haul.booking.rescheduled':
+      return buildBookingRescheduledCustomerEmail(data);
 
     case 'haul.payment.authorization_failed':
       return buildPaymentAuthorizationFailedEmail(data);
