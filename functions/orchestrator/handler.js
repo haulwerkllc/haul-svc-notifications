@@ -341,6 +341,9 @@ async function constructNotificationContent(event) {
     case 'haul.payment.authorization_failed':
       return constructPaymentAuthorizationFailedNotification(event);
 
+    case 'haul.payment.capture_failed':
+      return constructPaymentCaptureFailedNotification(event);
+
     case 'haul.payment.captured':
       return constructPaymentCapturedNotification(event);
 
@@ -1320,6 +1323,22 @@ function constructPaymentAuthorizationFailedNotification(event) {
     entity: {
       id: event.entity?.id || event.context?.booking_id,
       type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payment.capture_failed events
+ * Recipients: Customer only
+ */
+function constructPaymentCaptureFailedNotification(event) {
+  return {
+    subject: 'Payment required',
+    body: 'We were unable to process your payment. Please open the Haul app to update your payment and keep your account active.',
+    entity: {
+      id: event.entity?.id || event.context?.invoice_id,
+      type: 'invoice'
     },
     data: event.context || {}
   };

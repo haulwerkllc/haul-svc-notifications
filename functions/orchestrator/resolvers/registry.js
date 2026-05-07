@@ -21,6 +21,7 @@ const BookingRescheduledResolver = require('./booking_rescheduled_resolver');
 const BookingCompletedResolver = require('./booking_completed_resolver');
 const BookingCanceledResolver = require('./booking_canceled_resolver');
 const PaymentAuthorizationFailedResolver = require('./payment_authorization_failed_resolver');
+const PaymentCaptureFailedResolver = require('./payment_capture_failed_resolver');
 const PaymentCapturedResolver = require('./payment_captured_resolver');
 const PayoutSentResolver = require('./payout_sent_resolver');
 const MessageCreatedResolver = require('./message_created_resolver');
@@ -44,6 +45,7 @@ const resolvers = [
   new BookingCompletedResolver(),
   new BookingCanceledResolver(),
   new PaymentAuthorizationFailedResolver(),
+  new PaymentCaptureFailedResolver(),
   new PaymentCapturedResolver(),
   new PayoutSentResolver(),
   new MessageCreatedResolver(),
