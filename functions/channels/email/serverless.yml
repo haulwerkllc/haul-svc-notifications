@@ -1,0 +1,13 @@
+emailChannelHandler:
+  handler: functions/channels/email/email_handlers.handler
+  name: haul-svc-notifications-email-channel-${sls:stage}
+  description: Email delivery channel via Amazon Pinpoint
+  memorySize: 256
+  timeout: 60
+  events:
+    - sqs:
+        arn:
+          Fn::GetAtt:
+            - EmailChannelQueue
+            - Arn
+        batchSize: 10

@@ -1,0 +1,22 @@
+# SES Configuration
+#
+# Email delivery is performed via Amazon SES v2 API.
+# SES identities and configuration are managed in central Terraform as prerequisites.
+#
+# Prerequisites (managed in central Terraform):
+# - SES domain identity verification (e.g., haul.app)
+# - SES production access (sandbox removal)
+# - FROM address configuration
+#
+# The FROM address and source ARN are provided via environment variables:
+# - SES_FROM_ADDRESS (from env.{stage}.json)
+# - SES_SOURCE_ARN (from env.{stage}.json)
+#
+# IAM permissions for email delivery are granted in serverless.yml provider.iam.role.statements:
+# - ses:SendEmail
+# - ses:SendRawEmail
+#
+# Do NOT create SES identities or configuration sets in this service.
+
+Resources: {}
+Outputs: {}

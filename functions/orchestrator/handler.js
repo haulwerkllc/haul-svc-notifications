@@ -1,0 +1,1865 @@
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand, BatchGetCommand } = require('@aws-sdk/lib-dynamodb');
+const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
+const { Client } = require('@opensearch-project/opensearch');
+const { AwsSigv4Signer } = require('@opensearch-project/opensearch/aws');
+const { defaultProvider } = require('@aws-sdk/credential-provider-node');
+const {
+  buildResolverCoarseServiceAreasQuery,
+  normalizeServiceAreaType,
+  isValidGeoShapeGeometry,
+} = require('../../utils/service-area-geo-query');
+const { validateNotificationEvent } = require('../../utils/schema');
+const { getResolver } = require('./resolvers/registry');
+const { isAdminEligibleEvent } = require('./admin-event-registry');
+
+const dynamoClient = new DynamoDBClient({ region: process.env.REGION });
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
+  marshallOptions: { removeUndefinedValues: true },
+});
+const sqsClient = new SQSClient({ region: process.env.REGION });
+
+const NOTIFICATION_PREFERENCE_TABLE = process.env.NOTIFICATION_PREFERENCE_TABLE_NAME;
+const NOTIFICATION_INBOX_TABLE = process.env.NOTIFICATION_INBOX_TABLE_NAME;
+const JOB_TABLE = process.env.JOB_TABLE_NAME;
+const BID_TABLE = process.env.BID_TABLE_NAME;
+const COMPANY_TABLE = process.env.COMPANY_TABLE_NAME;
+const USER_TABLE = process.env.USER_TABLE_NAME;
+const MEDIA_BASE_URL = process.env.MEDIA_BASE_URL;
+const EMAIL_QUEUE_URL = process.env.EMAIL_QUEUE_URL;
+const PUSH_QUEUE_URL = process.env.PUSH_QUEUE_URL;
+const SMS_QUEUE_URL = process.env.SMS_QUEUE_URL;
+const ADMIN_QUEUE_URL = process.env.ADMIN_QUEUE_URL;
+const LIVE_ACTIVITY_QUEUE_URL = process.env.LIVE_ACTIVITY_QUEUE_URL;
+const JOB_AVAILABLE_QUEUE_URL = process.env.JOB_AVAILABLE_QUEUE_URL;
+const JOB_REMOVED_QUEUE_URL = process.env.JOB_REMOVED_QUEUE_URL;
+
+const OPENSEARCH_ENDPOINT = process.env.OPENSEARCH_ENDPOINT?.startsWith('https://')
+  ? process.env.OPENSEARCH_ENDPOINT
+  : `https://${process.env.OPENSEARCH_ENDPOINT}`;
+
+let _openSearchClient = null;
+function getOpenSearchClient() {
+  if (!_openSearchClient) {
+    _openSearchClient = new Client({
+      ...AwsSigv4Signer({
+        region: process.env.REGION,
+        service: 'es',
+        getCredentials: () => defaultProvider()(),
+      }),
+      node: OPENSEARCH_ENDPOINT,
+    });
+  }
+  return _openSearchClient;
+}
+
+/**
+ * Notifications Orchestrator Lambda
+ * 
+ * Responsibilities:
+ * - Consume EventBridge events
+ * - Validate the ingress payload
+ * - Resolve recipients (explicit users or service-area providers)
+ * - Load user notification preferences
+ * - Determine eligible channels
+ * - Always write a notification record to NotificationInbox
+ * - Enqueue email messages to the EmailChannel SQS queue when email is enabled
+ */
+exports.handler = async (event) => {
+  console.log('[Orchestrator] Received EventBridge event', JSON.stringify(event, null, 2));
+
+  try {
+    // Extract the detail payload
+    const notificationEvent = event.detail;
+
+    // Validate the canonical ingress schema
+    const validation = validateNotificationEvent(notificationEvent);
+    if (!validation.valid) {
+      console.error('[Orchestrator] Schema validation failed', {
+        errors: validation.errors,
+        event_id: notificationEvent.event_id
+      });
+      throw new Error(`Schema validation failed: ${validation.errors.join(', ')}`);
+    }
+
+    console.log('[Orchestrator] Event validated successfully', {
+      event_id: notificationEvent.event_id,
+      event_type: notificationEvent.event_type
+    });
+
+    // Resolve recipients using event-type-specific resolver
+    const resolver = getResolver(notificationEvent.event_type);
+    if (!resolver) {
+      console.warn('[Orchestrator] No resolver found for event type', {
+        event_type: notificationEvent.event_type,
+        event_id: notificationEvent.event_id
+      });
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: 'No resolver for event type', skipped: true })
+      };
+    }
+
+    let recipients = await resolver.resolve(notificationEvent);
+    console.log('[Orchestrator] Recipients resolved', {
+      event_id: notificationEvent.event_id,
+      count: recipients.length
+    });
+
+    // Test account isolation: when the originating event is from a test account,
+    // filter recipients so only other test accounts receive notifications.
+    // This prevents App Store review activity from reaching real company users/dispatchers.
+    if (notificationEvent.is_test && recipients.length > 0) {
+      const userIds = recipients.map(r => r.user_id);
+      const testFlags = await batchGetUsersIsTestAccount(userIds);
+      const originalCount = recipients.length;
+      recipients = recipients.filter(r => testFlags[r.user_id] === true);
+      console.log('[Orchestrator] Test account isolation applied', {
+        event_id: notificationEvent.event_id,
+        original_count: originalCount,
+        filtered_count: recipients.length,
+      });
+    }
+
+    // Check admin routing mode
+    const isAdminOnly = notificationEvent.recipients?.admin_only === true;
+    const isAdminEligible = isAdminEligibleEvent(notificationEvent.event_type);
+
+    // Admin-only mode: skip user routing, send only to admin — skip entirely for test account events
+    if (isAdminOnly) {
+      if (notificationEvent.is_test) {
+        console.log('[Orchestrator] Admin-only event suppressed (test account)', {
+          event_id: notificationEvent.event_id,
+          event_type: notificationEvent.event_type,
+        });
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ message: 'Admin-only notification suppressed (test account)', event_id: notificationEvent.event_id }),
+        };
+      }
+      console.log('[Orchestrator] Admin-only event, skipping user routing', {
+        event_id: notificationEvent.event_id,
+        event_type: notificationEvent.event_type
+      });
+      // Build enriched notification content for admin
+      const notificationContent = await constructNotificationContent(notificationEvent);
+      await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: 'Admin-only notification sent',
+          event_id: notificationEvent.event_id
+        })
+      };
+    }
+
+    if (recipients.length === 0) {
+      console.info('[Orchestrator] No recipients to notify (resolver returned empty list)');
+      // Still send to admin if eligible and not a test event
+      if (isAdminEligible && !notificationEvent.is_test) {
+        const notificationContent = await constructNotificationContent(notificationEvent);
+        await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
+      }
+      // Still fan out the WS job.removed signal even when there are no notification recipients
+      // (e.g. job canceled before any bids — no push/email to send, but dispatchers must still
+      // see the removal from their available jobs list).
+      if (notificationEvent.event_type === 'haul.job.canceled' && !notificationEvent.is_test) {
+        await sendJobRemovedMessages(notificationEvent.entity.id);
+      }
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: 'No recipients', skipped: true })
+      };
+    }
+
+    // Process each recipient (standard user routing)
+    for (const recipient of recipients) {
+      await processRecipient(recipient, notificationEvent);
+    }
+
+    // For job.posted events, fan out a per-company WebSocket signal so connected
+    // dispatchers get an in-session badge without polling.
+    if (notificationEvent.event_type === 'haul.job.posted' && recipients.length > 0 && !notificationEvent.is_test) {
+      const uniqueCompanyIds = [...new Set(
+        recipients.map(r => r.metadata?.company_id).filter(Boolean)
+      )];
+      await sendJobAvailableMessages(notificationEvent.entity.id, uniqueCompanyIds);
+    }
+
+    // For job.canceled events, fan out a targeted job.removed WS signal to every
+    // company whose service area contains the job's pickup location — so all
+    // dispatchers browsing available jobs see the removal instantly, not just bidders.
+    if (notificationEvent.event_type === 'haul.job.canceled' && !notificationEvent.is_test) {
+      await sendJobRemovedMessages(notificationEvent.entity.id);
+    }
+
+    // Dual routing: also send to admin if event is eligible — skip for test account events
+    if (isAdminEligible && !notificationEvent.is_test) {
+      console.log('[Orchestrator] Event is admin-eligible, routing to admin channel', {
+        event_id: notificationEvent.event_id,
+        event_type: notificationEvent.event_type
+      });
+      const notificationContent = await constructNotificationContent(notificationEvent);
+      await enqueueToAdminChannel(notificationEvent, recipients, notificationContent);
+    }
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        message: 'Notifications orchestrated successfully',
+        event_id: notificationEvent.event_id,
+        recipients_count: recipients.length
+      })
+    };
+  } catch (error) {
+    console.error('[Orchestrator] Error processing event', {
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+};
+
+/**
+ * Process a single recipient
+ * - Load entity data and construct notification content
+ * - Load notification preferences
+ * - Write to NotificationInbox
+ * - Enqueue to enabled channels
+ */
+async function processRecipient(recipient, event) {
+  const userId = recipient.user_id;
+
+  console.log('[Orchestrator] Processing recipient', {
+    user_id: userId,
+    event_type: event.event_type,
+    event_id: event.event_id
+  });
+
+  // Construct notification content based on event type and entity data
+  const notificationContent = await constructNotificationContent(event);
+
+  // Load user notification preferences
+  const preferences = await loadNotificationPreferences(userId);
+
+  // Determine which channels are enabled for this event type
+  const enabledChannels = determineEnabledChannels(event.event_type, preferences, recipient.metadata);
+
+  console.log('[Orchestrator] Enabled channels for recipient', {
+    user_id: userId,
+    enabled_channels: enabledChannels
+  });
+
+  // Always write to NotificationInbox (regardless of channel preferences)
+  // Returns the generated notification_id and timestamp
+  const { notificationId, timestamp } = await writeToInbox(userId, event, enabledChannels, notificationContent);
+
+  // Enqueue to each enabled channel
+  for (const channel of enabledChannels) {
+    await enqueueToChannel(channel, userId, event, notificationId, timestamp, recipient.metadata, notificationContent);
+  }
+}
+
+/**
+ * Load job data from DynamoDB
+ */
+async function loadJobData(jobId) {
+  try {
+    const result = await docClient.send(new GetCommand({
+      TableName: JOB_TABLE,
+      Key: { id: jobId }
+    }));
+
+    if (!result.Item) {
+      console.warn('[Orchestrator] Job not found', { job_id: jobId });
+      return null;
+    }
+
+    return result.Item;
+  } catch (error) {
+    console.error('[Orchestrator] Error loading job data', {
+      job_id: jobId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Construct notification content based on event type
+ * Loads entity data and builds subject/body for user-facing notification
+ */
+async function constructNotificationContent(event) {
+  const { event_type, entity } = event;
+
+  switch (event_type) {
+    case 'haul.job.posted':
+      return await constructJobPostedNotification(entity.id);
+    
+    case 'haul.job.canceled':
+      return await constructJobCanceledNotification(entity.id);
+    
+    case 'haul.job.closed':
+      return await constructJobClosedNotification(entity.id, event);
+    
+    case 'haul.bid.created':
+      return await constructBidCreatedNotification(entity.id);
+    
+    case 'haul.bid.updated':
+      return await constructBidUpdatedNotification(entity.id);
+    
+    case 'haul.booking.created':
+      return constructBookingCreatedNotification(event);
+    
+    case 'haul.booking.assigned':
+      return constructBookingAssignedNotification(event);
+    
+    case 'haul.booking.crew_en_route_pickup':
+      return constructBookingCrewEnRoutePickupNotification(event);
+
+    case 'haul.booking.in_progress_pickup':
+      return constructBookingInProgressPickupNotification(event);
+
+    case 'haul.booking.crew_en_route_dropoff':
+      return constructBookingCrewEnRouteDropoffNotification(event);
+
+    case 'haul.booking.in_progress_dropoff':
+      return constructBookingInProgressDropoffNotification(event);
+
+    case 'haul.booking.pending_confirmation':
+      return constructBookingPendingConfirmationNotification(event);
+    
+    case 'haul.booking.rescheduled':
+      return constructBookingRescheduledNotification(event);
+
+    case 'haul.booking.completed':
+      return constructBookingCompletedNotification(event);
+
+    case 'haul.booking.canceled':
+      return constructBookingCanceledNotification(event);
+
+    case 'haul.payment.authorization_failed':
+      return constructPaymentAuthorizationFailedNotification(event);
+
+    case 'haul.payment.capture_failed':
+      return constructPaymentCaptureFailedNotification(event);
+
+    case 'haul.payment.captured':
+      return constructPaymentCapturedNotification(event);
+
+    case 'haul.payout.sent':
+      return constructPayoutSentNotification(event);
+
+    case 'haul.message.created':
+      return constructMessageCreatedNotification(event);
+
+    case 'haul.booking.eta_update':
+      return {
+        subject: 'ETA update',
+        body: '',
+        entity: { id: event.entity.id, type: 'booking' },
+        data: event.context || {}
+      };
+    
+    default:
+      console.warn('[Orchestrator] No content constructor for event type', { event_type });
+      return {
+        subject: 'New notification',
+        body: `You have a new ${event_type} notification.`,
+        entity: {
+          id: entity.id,
+          type: entity.type
+        }
+      };
+  }
+}
+
+/**
+ * Construct notification content for haul.job.posted events
+ */
+async function constructJobPostedNotification(jobId) {
+  const job = await loadJobData(jobId);
+
+  if (!job) {
+    // Fallback if job not found
+    return {
+      subject: 'New job available in your service area',
+      body: 'A new job has been posted in your service area.',
+      entity: {
+        id: jobId,
+        type: 'job'
+      }
+    };
+  }
+
+  // Extract job attributes
+  const jobType = job.job_type || 'hauling';
+  const timingPreference = job.timing_preference || 'Not specified';
+  
+  // Build human-readable address from PICKUP stop
+  const pickupStop = getPickupStop(job);
+  const pickupAddress = pickupStop
+    ? formatStopAddress(pickupStop)
+    : 'Location not specified';
+  const pickupTimezone = pickupStop?.timezone || null;
+
+  // Build subject line
+  const subject = 'New job near you';
+
+  // Build notification body with available details
+  const bodyParts = [
+    `A new ${jobType.toLowerCase().replace(/_/g, ' ')} job has been posted near you.`,
+    '',
+    `Location: ${pickupAddress}`,
+    `Timing: ${timingPreference}`
+  ];
+
+  // Add additional context if available
+  if (job.description) {
+    bodyParts.push('');
+    bodyParts.push('Details:');
+    bodyParts.push(job.description.substring(0, 200) + (job.description.length > 200 ? '...' : ''));
+  }
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: jobId,
+      type: 'job'
+    },
+    // Include raw data for deep linking or custom rendering
+    data: {
+      job_type: job.job_type,
+      stops: job.stops,
+      timing_preference: job.timing_preference,
+      preferred_pickup_window_start: job.preferred_pickup_window_start,
+      preferred_pickup_window_end: job.preferred_pickup_window_end,
+      bidding_closes_at: job.bidding_closes_at,
+      pickup_timezone: pickupTimezone
+    }
+  };
+}
+
+/**
+ * Get the PICKUP stop from a job.
+ * Returns the first stop with stop_type === 'PICKUP', or the first stop.
+ *
+ * @param {object} job - Job object with stops[]
+ * @returns {object|null} PICKUP stop or null
+ */
+function getPickupStop(job) {
+  if (!job?.stops || !Array.isArray(job.stops) || job.stops.length === 0) return null;
+  return job.stops.find(s => s.stop_type === 'PICKUP') || job.stops[0];
+}
+
+/**
+ * Get the DROPOFF stop from a job.
+ *
+ * @param {object} job - Job object with stops[]
+ * @returns {object|null} DROPOFF stop or null
+ */
+function getDropoffStop(job) {
+  if (!job?.stops || !Array.isArray(job.stops)) return null;
+  return job.stops.find(s => s.stop_type === 'DROPOFF') || null;
+}
+
+/**
+ * Get pickup timezone from a job's PICKUP stop.
+ *
+ * @param {object} job - Job object with stops[]
+ * @returns {string|null} Timezone string or null
+ */
+function getPickupTimezone(job) {
+  const pickup = getPickupStop(job);
+  return pickup?.timezone || null;
+}
+
+/**
+ * Format a stop object into a human-readable address string.
+ * If !display_name, renders line_1 as display_name.
+ * Includes display_name (e.g., business name) if present and differs from line_1.
+ *
+ * @param {object} stop - Stop object with address fields
+ * @returns {string} Formatted address string
+ */
+function formatStopAddress(stop) {
+  if (!stop) return 'Location not specified';
+  if (typeof stop === 'string') return stop;
+
+  const parts = [];
+
+  // Determine display_name: use stop.display_name, or fallback to line_1
+  const displayName = stop.display_name || stop.line_1;
+
+  // Show display_name if it exists and differs from line_1
+  if (displayName && displayName !== stop.line_1) {
+    parts.push(displayName);
+  }
+
+  if (stop.line_1) {
+    parts.push(stop.line_1);
+    if (stop.line_2) parts.push(stop.line_2);
+  }
+
+  if (stop.city) parts.push(stop.city);
+  if (stop.state) parts.push(stop.state);
+  if (stop.postal_code) parts.push(stop.postal_code);
+
+  return parts.length > 0 ? parts.join(', ') : 'Location not specified';
+}
+
+/**
+ * Load bid data from DynamoDB
+ */
+async function loadBidData(bidId) {
+  try {
+    const result = await docClient.send(new GetCommand({
+      TableName: BID_TABLE,
+      Key: { id: bidId }
+    }));
+
+    if (!result.Item) {
+      console.warn('[Orchestrator] Bid not found', { bid_id: bidId });
+      return null;
+    }
+
+    return result.Item;
+  } catch (error) {
+    console.error('[Orchestrator] Error loading bid data', {
+      bid_id: bidId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Load company data from DynamoDB
+ */
+async function loadCompanyData(companyId) {
+  try {
+    const result = await docClient.send(new GetCommand({
+      TableName: COMPANY_TABLE,
+      Key: { id: companyId }
+    }));
+
+    if (!result.Item) {
+      console.warn('[Orchestrator] Company not found', { company_id: companyId });
+      return null;
+    }
+
+    return result.Item;
+  } catch (error) {
+    console.error('[Orchestrator] Error loading company data', {
+      company_id: companyId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Format cents to USD dollars
+ */
+function formatCentsToUSD(cents) {
+  if (cents === null || cents === undefined) return 'Price not specified';
+  const dollars = cents / 100;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(dollars);
+}
+
+/**
+ * Format job type for consumer-friendly display
+ */
+function formatJobTypeForConsumer(jobType) {
+  const map = {
+    'JUNK_REMOVAL': 'junk hauling',
+    'MOVING': 'small move'
+  };
+  return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
+}
+
+/**
+ * Format pickup window for display
+ * @param {string} start - ISO timestamp for window start
+ * @param {string} end - ISO timestamp for window end
+ * @param {string} [timezone] - IANA timezone identifier (e.g., 'America/Los_Angeles')
+ */
+function formatPickupWindow(start, end, timezone) {
+  if (!start || !end) return 'Flexible';
+  
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  
+  const dateOptions = { 
+    weekday: 'short',
+    month: 'short', 
+    day: 'numeric',
+    ...(timezone && { timeZone: timezone })
+  };
+  
+  const timeOptions = { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    hour12: true,
+    ...(timezone && { timeZone: timezone })
+  };
+  
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', dateOptions);
+  };
+  
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', timeOptions);
+  };
+  
+  // Get timezone abbreviation for display
+  const tzAbbrev = timezone 
+    ? new Intl.DateTimeFormat('en-US', { timeZone: timezone, timeZoneName: 'short' })
+        .formatToParts(startDate)
+        .find(p => p.type === 'timeZoneName')?.value || ''
+    : '';
+  const tzSuffix = tzAbbrev ? ` ${tzAbbrev}` : '';
+  
+  // If same day, show date once
+  if (startDate.toDateString() === endDate.toDateString()) {
+    return `${formatDate(startDate)}, ${formatTime(startDate)} - ${formatTime(endDate)}${tzSuffix}`;
+  }
+  
+  return `${formatDate(startDate)} ${formatTime(startDate)} - ${formatDate(endDate)} ${formatTime(endDate)}${tzSuffix}`;
+}
+
+/**
+ * Construct notification content for haul.bid.created events
+ * Consumer-facing notification for new bid received
+ */
+async function constructBidCreatedNotification(bidId) {
+  // Load bid data
+  const bid = await loadBidData(bidId);
+  
+  if (!bid) {
+    return {
+      subject: 'You received a new bid',
+      body: 'A new bid has been submitted on your job.',
+      entity: { id: bidId, type: 'bid' }
+    };
+  }
+
+  // Load job data
+  const job = await loadJobData(bid.job_id);
+  
+  // Load company data
+  const company = bid.company_id ? await loadCompanyData(bid.company_id) : null;
+
+  // Get job timezone from PICKUP stop
+  const jobTimezone = getPickupTimezone(job);
+  const pickupStop = getPickupStop(job);
+
+  // Format bid details
+  const bidAmount = formatCentsToUSD(bid.amount_cents);
+  const companyName = company?.name || 'A service provider';
+  const jobType = formatJobTypeForConsumer(bid.job_type);
+  const pickupWindow = formatPickupWindow(
+    bid.proposed_pickup_window_start,
+    bid.proposed_pickup_window_end,
+    jobTimezone
+  );
+  
+  // Build address from PICKUP stop
+  const locationText = pickupStop
+    ? formatStopAddress(pickupStop)
+    : 'Your job location';
+
+  // Build subject line
+  const subject = 'You received a new bid on your job';
+
+  // Build body
+  const bodyParts = [
+    `${companyName} has submitted a bid on your ${jobType} job.`,
+    '',
+    `Bid amount: ${bidAmount}`,
+    `Location: ${locationText}`,
+    `Proposed service window: ${pickupWindow}`
+  ];
+
+  if (bid.notes) {
+    bodyParts.push('');
+    bodyParts.push('Provider notes:');
+    bodyParts.push(bid.notes);
+  }
+
+  bodyParts.push('');
+  bodyParts.push('Review this bid in the Haul app to accept and book.');
+
+  // Build company logo URL if available
+  const companyLogoUrl = company?.logo_key 
+    ? `${MEDIA_BASE_URL}/${company.logo_key}` 
+    : null;
+  const companyIconUrl = company?.icon_key 
+    ? `${MEDIA_BASE_URL}/${company.icon_key}` 
+    : null;
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: bidId,
+      type: 'bid'
+    },
+    data: {
+      bid_id: bidId,
+      bid_amount_cents: bid.amount_cents,
+      bid_amount_formatted: bidAmount,
+      job_id: bid.job_id,
+      job_type: bid.job_type,
+      job_type_formatted: jobType,
+      company_id: bid.company_id,
+      company_name: companyName,
+      company_logo_url: companyLogoUrl,
+      company_icon_url: companyIconUrl,
+      stops: job?.stops,
+      location_formatted: locationText,
+      proposed_pickup_window_start: bid.proposed_pickup_window_start,
+      proposed_pickup_window_end: bid.proposed_pickup_window_end,
+      pickup_window_formatted: pickupWindow,
+      bidding_closes_at: job?.bidding_closes_at,
+      pickup_timezone: jobTimezone,
+      notes: bid.notes
+    }
+  };
+}
+
+/**
+ * Construct notification content for haul.bid.updated events
+ * Consumer-facing notification for bid update
+ */
+async function constructBidUpdatedNotification(bidId) {
+  // Load bid data
+  const bid = await loadBidData(bidId);
+  
+  if (!bid) {
+    return {
+      subject: 'A bid on your job was updated',
+      body: 'A bid on your job has been updated.',
+      entity: { id: bidId, type: 'bid' }
+    };
+  }
+
+  // Load job data
+  const job = await loadJobData(bid.job_id);
+  
+  // Load company data
+  const company = bid.company_id ? await loadCompanyData(bid.company_id) : null;
+
+  // Get job timezone from PICKUP stop
+  const jobTimezone = getPickupTimezone(job);
+  const pickupStop = getPickupStop(job);
+
+  // Format bid details
+  const bidAmount = formatCentsToUSD(bid.amount_cents);
+  const companyName = company?.name || 'A service provider';
+  const jobType = formatJobTypeForConsumer(bid.job_type);
+  const pickupWindow = formatPickupWindow(
+    bid.proposed_pickup_window_start,
+    bid.proposed_pickup_window_end,
+    jobTimezone
+  );
+  
+  // Build address from PICKUP stop
+  const locationText = pickupStop
+    ? formatStopAddress(pickupStop)
+    : 'Your job location';
+
+  // Build subject line
+  const subject = 'A bid on your job was updated';
+
+  // Build body
+  const bodyParts = [
+    `${companyName} has updated their bid on your ${jobType} job.`,
+    '',
+    `Updated bid amount: ${bidAmount}`,
+    `Location: ${locationText}`,
+    `Proposed service window: ${pickupWindow}`
+  ];
+
+  if (bid.notes) {
+    bodyParts.push('');
+    bodyParts.push('Provider notes:');
+    bodyParts.push(bid.notes);
+  }
+
+  bodyParts.push('');
+  bodyParts.push('Review the updated bid in the Haul app.');
+
+  // Build company logo URL if available
+  const companyLogoUrl = company?.logo_key 
+    ? `${MEDIA_BASE_URL}/${company.logo_key}` 
+    : null;
+  const companyIconUrl = company?.icon_key 
+    ? `${MEDIA_BASE_URL}/${company.icon_key}` 
+    : null;
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: bidId,
+      type: 'bid'
+    },
+    data: {
+      bid_id: bidId,
+      bid_amount_cents: bid.amount_cents,
+      bid_amount_formatted: bidAmount,
+      job_id: bid.job_id,
+      job_type: bid.job_type,
+      job_type_formatted: jobType,
+      company_id: bid.company_id,
+      company_name: companyName,
+      company_logo_url: companyLogoUrl,
+      company_icon_url: companyIconUrl,
+      stops: job?.stops,
+      location_formatted: locationText,
+      proposed_pickup_window_start: bid.proposed_pickup_window_start,
+      proposed_pickup_window_end: bid.proposed_pickup_window_end,
+      pickup_window_formatted: pickupWindow,
+      bidding_closes_at: job?.bidding_closes_at,
+      pickup_timezone: jobTimezone,
+      notes: bid.notes
+    }
+  };
+}
+
+/**
+ * Construct notification content for haul.job.canceled events
+ * Recipients: Service providers with open bids
+ */
+async function constructJobCanceledNotification(jobId) {
+  const job = await loadJobData(jobId);
+
+  if (!job) {
+    return {
+      subject: 'A job you bid on was canceled',
+      body: 'A job you submitted a bid on has been canceled by the customer.',
+      entity: { id: jobId, type: 'job' }
+    };
+  }
+
+  // Format job details
+  const jobType = formatJobTypeForServiceProvider(job.job_type);
+  const pickupStop = getPickupStop(job);
+  const pickupAddress = pickupStop
+    ? formatStopAddress(pickupStop)
+    : 'Location not specified';
+
+  const subject = 'A job you bid on was canceled';
+
+  const bodyParts = [
+    `The ${jobType} job you submitted a bid on has been canceled by the customer.`,
+    '',
+    `Location: ${pickupAddress}`
+  ];
+
+  if (job.description) {
+    bodyParts.push('');
+    bodyParts.push(`Job details: ${job.description.substring(0, 100)}${job.description.length > 100 ? '...' : ''}`);
+  }
+
+  bodyParts.push('');
+  bodyParts.push('No further action is required. Your bid has been automatically withdrawn.');
+
+  return {
+    subject,
+    body: bodyParts.join('\n'),
+    entity: {
+      id: jobId,
+      type: 'job'
+    },
+    data: {
+      job_id: jobId,
+      job_type: job.job_type,
+      job_type_formatted: jobType,
+      stops: job.stops,
+      location_formatted: pickupAddress,
+      description: job.description
+    }
+  };
+}
+
+/**
+ * Format job type for service provider display
+ */
+function formatJobTypeForServiceProvider(jobType) {
+  const map = {
+    'JUNK_REMOVAL': 'junk removal',
+    'MOVING': 'small move'
+  };
+  return map[jobType] || jobType?.toLowerCase().replace(/_/g, ' ') || 'hauling';
+}
+
+/**
+ * Construct notification content for haul.job.closed events
+ * Recipients: Consumer who posted the job
+ *
+ * Scenarios (set by emitter in event.context.scenario):
+ *   OPEN_FOR_BIDS_WITH_BIDS    — bidding closed, bids exist → BID_SELECTION_PENDING
+ *   OPEN_FOR_BIDS_NO_BIDS      — bidding closed, no bids    → EXPIRED
+ *   INSTANT_BOOK_WITH_BIDS     — instant book closed, bids exist → BID_SELECTION_PENDING
+ *   INSTANT_BOOK_NO_BIDS       — instant book closed, no bids   → EXPIRED
+ *   EXPIRED_NO_SELECTION       — grace period elapsed, no bid selected (expire-unselected-bids)
+ */
+async function constructJobClosedNotification(jobId, event) {
+  const job = await loadJobData(jobId);
+
+  if (!job) {
+    return {
+      subject: 'Bidding has closed on your job',
+      body: 'The bidding period for your job has ended.',
+      entity: { id: jobId, type: 'job' }
+    };
+  }
+
+  const scenario  = event.context?.scenario;
+  const bidCount  = event.context?.bid_count ?? null;
+  const jobType   = formatJobTypeForConsumer(job.job_type);
+  const pickupStop = getPickupStop(job);
+  const pickupAddress = pickupStop ? formatStopAddress(pickupStop) : 'Your job location';
+
+  const baseData = {
+    job_id: jobId,
+    job_type: job.job_type,
+    job_type_formatted: jobType,
+    stops: job.stops,
+    location_formatted: pickupAddress,
+  };
+
+  console.log('[Orchestrator] constructJobClosedNotification', { job_id: jobId, scenario, bidCount });
+
+  // Grace period elapsed, no bid selected (fired by expire-unselected-bids)
+  if (scenario === 'EXPIRED_NO_SELECTION') {
+    return {
+      subject: 'Your job has closed',
+      body: [
+        `The selection window for your ${jobType} job has ended and no bid was selected.`,
+        '',
+        `Location: ${pickupAddress}`,
+        '',
+        'You can repost the job if you still need the service.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, scenario: 'EXPIRED_NO_SELECTION' }
+    };
+  }
+
+  // Instant book window closed — no providers accepted the price
+  if (scenario === 'INSTANT_BOOK_NO_BIDS') {
+    return {
+      subject: 'Your instant book price was not accepted',
+      body: [
+        `Your instant book price for your ${jobType} job was not accepted by any service providers within the 48-hour window.`,
+        '',
+        `Location: ${pickupAddress}`,
+        '',
+        'You can repost the job to receive competitive bids, or try a different instant book price.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, scenario: 'INSTANT_BOOK_NO_BIDS' }
+    };
+  }
+
+  // Instant book window closed — providers submitted bids instead of accepting the price
+  if (scenario === 'INSTANT_BOOK_WITH_BIDS') {
+    const quoteText = bidCount === 1 ? '1 quote' : `${bidCount ?? 'some'} quotes`;
+    return {
+      subject: `You have ${quoteText} to review`,
+      body: [
+        `Your instant book window for your ${jobType} job has ended, but providers submitted ${quoteText}.`,
+        '',
+        `Review and select a quote to book your service.`,
+        '',
+        `Location: ${pickupAddress}`
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, bid_count: bidCount, scenario: 'INSTANT_BOOK_WITH_BIDS' }
+    };
+  }
+
+  // Bidding closed — bids exist
+  if (scenario === 'OPEN_FOR_BIDS_WITH_BIDS') {
+    const quoteText = bidCount === 1 ? '1 quote' : `${bidCount ?? 'some'} quotes`;
+    return {
+      subject: `You have ${quoteText} to review`,
+      body: [
+        `The bidding period for your ${jobType} job has ended.`,
+        '',
+        `You received ${quoteText}. Review and select a quote to book your service.`,
+        '',
+        `Location: ${pickupAddress}`
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, bid_count: bidCount, scenario: 'OPEN_FOR_BIDS_WITH_BIDS' }
+    };
+  }
+
+  // Bidding closed — no bids received
+  if (scenario === 'OPEN_FOR_BIDS_NO_BIDS') {
+    return {
+      subject: 'Your job did not receive any quotes',
+      body: [
+        `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
+        '',
+        `Location: ${pickupAddress}`,
+        '',
+        'This can happen when providers in your area are at capacity. You can repost your job to try again.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, bid_count: 0, scenario: 'OPEN_FOR_BIDS_NO_BIDS' }
+    };
+  }
+
+  // Legacy fallback: no scenario in event — infer from job state + live bid query
+  if (job.instant_book === true) {
+    return {
+      subject: 'Your instant book price was not accepted',
+      body: [
+        `Your instant book price for your ${jobType} job was not accepted by any service providers within the 48-hour window.`,
+        '',
+        `Location: ${pickupAddress}`,
+        '',
+        'You can repost the job to receive competitive bids, or try a different instant book price.'
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, scenario: 'INSTANT_BOOK_NO_BIDS' }
+    };
+  }
+
+  const openBids = await queryOpenBidsForJob(jobId);
+  const liveBidCount = openBids.length;
+
+  console.log('[Orchestrator] Job closed legacy fallback', {
+    job_id: jobId,
+    bid_count: liveBidCount,
+  });
+
+  if (liveBidCount > 0) {
+    const quoteText = liveBidCount === 1 ? '1 quote' : `${liveBidCount} quotes`;
+    return {
+      subject: `You have ${quoteText} to review`,
+      body: [
+        `The bidding period for your ${jobType} job has ended.`,
+        '',
+        `You received ${quoteText}. Review and select a quote to book your service.`,
+        '',
+        `Location: ${pickupAddress}`
+      ].join('\n'),
+      entity: { id: jobId, type: 'job' },
+      data: { ...baseData, bid_count: liveBidCount, scenario: 'OPEN_FOR_BIDS_WITH_BIDS' }
+    };
+  }
+
+  return {
+    subject: 'Your job did not receive any quotes',
+    body: [
+      `Unfortunately, no service providers submitted quotes for your ${jobType} job.`,
+      '',
+      `Location: ${pickupAddress}`,
+      '',
+      'This can happen when providers in your area are at capacity. You can repost your job to try again.'
+    ].join('\n'),
+    entity: { id: jobId, type: 'job' },
+    data: { ...baseData, bid_count: 0, scenario: 'OPEN_FOR_BIDS_NO_BIDS' }
+  };
+}
+
+/**
+ * Query open bids for a job using GSI jobId-status-index
+ */
+async function queryOpenBidsForJob(jobId) {
+  try {
+    const result = await docClient.send(new QueryCommand({
+      TableName: BID_TABLE,
+      IndexName: 'jobId-status-index',
+      KeyConditionExpression: 'job_id = :jobId AND #status = :status',
+      ExpressionAttributeNames: {
+        '#status': 'status'
+      },
+      ExpressionAttributeValues: {
+        ':jobId': jobId,
+        ':status': 'OPEN'
+      }
+    }));
+
+    return result.Items || [];
+  } catch (error) {
+    console.error('[Orchestrator] Error querying open bids', {
+      job_id: jobId,
+      error: error.message
+    });
+    return [];
+  }
+}
+
+/**
+ * Construct notification content for haul.booking.created events
+ * Recipients: Service provider OWNER/ADMIN/DISPATCHER users
+ * 
+ * This event already contains all necessary data in event.context from the jobs service.
+ * We pass it through as the data field for email templates.
+ */
+function constructBookingCreatedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  const companyName = event.context?.company_name || 'a service provider';
+
+  console.log('[constructBookingCreatedNotification] event.context:', JSON.stringify(event.context, null, 2));
+  console.log('[constructBookingCreatedNotification] job_type in context:', event.context?.job_type);
+  console.log('[constructBookingCreatedNotification] instant_book:', event.context?.instant_book);
+
+  if (event.context?.instant_book) {
+    // Customer receives: company accepted their instant book price
+    return {
+      subject: `Booking confirmed – ${companyName} is on it`,
+      body: `Your instant booking has been accepted by ${companyName}. Your job is booked.`,
+      entity: {
+        id: event.entity.id,
+        type: 'booking'
+      },
+      data: event.context || {}
+    };
+  }
+
+  // Company users receive: customer accepted their bid
+  return {
+    subject: `Job won – Booking ${bookingNumber} confirmed`,
+    body: `A customer has accepted your bid. Booking ${bookingNumber} is confirmed.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.assigned events
+ * Recipients: Customer AND driver
+ * 
+ * This event already contains all necessary data in event.context.
+ */
+function constructBookingAssignedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  
+  console.log('[constructBookingAssignedNotification] event.context:', JSON.stringify(event.context, null, 2));
+  console.log('[constructBookingAssignedNotification] booking_number:', event.context?.booking_number);
+  console.log('[constructBookingAssignedNotification] driver_given_name:', event.context?.driver_given_name);
+  
+  const driverGivenName = event.context?.driver_given_name || null;
+
+  return {
+    subject: `Crew assigned to booking ${bookingNumber}`,
+    body: driverGivenName
+      ? `Crew leader ${driverGivenName} has been assigned to your booking.`
+      : `A crew has been assigned to your booking.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.in_progress_pickup events
+ * Recipients: Customer
+ * 
+ * This event already contains all necessary data in event.context.
+ */
+function getStopAddress(stops, stopType) {
+  const stop = stops?.find(s => s.stop_type === stopType) || stops?.[0] || null;
+  return stop?.display_name || stop?.line_1 || null;
+}
+
+/**
+ * Construct notification content for haul.booking.crew_en_route_pickup events
+ * Recipients: Customer
+ */
+function constructBookingCrewEnRoutePickupNotification(event) {
+  const address = getStopAddress(event.context?.stops, 'PICKUP');
+  return {
+    subject: 'Crew en route to pickup location',
+    body: address
+      ? `Your crew is en route to ${address}.`
+      : 'Your crew is en route to the pickup location.',
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.in_progress_pickup events
+ * Recipients: Customer
+ */
+function constructBookingInProgressPickupNotification(event) {
+  const address = getStopAddress(event.context?.stops, 'PICKUP');
+  return {
+    subject: 'Your crew has arrived for pickup',
+    body: address
+      ? `Pickup at ${address} is in progress.`
+      : 'Your crew has arrived and pickup is in progress.',
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.crew_en_route_dropoff events
+ * Recipients: Customer
+ */
+function constructBookingCrewEnRouteDropoffNotification(event) {
+  const address = getStopAddress(event.context?.stops, 'DROPOFF');
+  return {
+    subject: 'Crew en route to dropoff location',
+    body: address
+      ? `Your crew is en route to ${address}.`
+      : 'Your crew is en route to the dropoff location.',
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.in_progress_dropoff events
+ * Recipients: Customer
+ */
+function constructBookingInProgressDropoffNotification(event) {
+  const address = getStopAddress(event.context?.stops, 'DROPOFF');
+  return {
+    subject: 'Your crew has arrived for dropoff',
+    body: address
+      ? `Dropoff at ${address} is in progress.`
+      : 'Your crew has arrived and dropoff is in progress.',
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.pending_confirmation events
+ * Recipients: Customer
+ */
+function constructBookingPendingConfirmationNotification(event) {
+  const jobType = (event.context?.job_type || 'hauling').toLowerCase().replace(/_/g, ' ');
+  return {
+    subject: 'Your service has been completed',
+    body: `Congratulations! Your ${jobType} service has been completed.`,
+    entity: { id: event.entity.id, type: 'booking' },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.rescheduled events
+ * Recipients: Customer only
+ * 
+ * This event already contains all necessary data in event.context.
+ */
+function constructBookingRescheduledNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  
+  return {
+    subject: `Booking ${bookingNumber} has been rescheduled`,
+    body: `Your service provider has updated the pickup time for your booking.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.completed events
+ * Recipients: Customer AND service provider users
+ */
+function constructBookingCompletedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  return {
+    subject: `Booking ${bookingNumber} complete`,
+    body: `Your booking ${bookingNumber} has been completed.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.booking.canceled events
+ * Recipients: Customer AND service provider users
+ */
+function constructBookingCanceledNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  return {
+    subject: `Booking ${bookingNumber} canceled`,
+    body: `Booking ${bookingNumber} has been canceled.`,
+    entity: {
+      id: event.entity.id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payment.authorization_failed events
+ * Recipients: Customer
+ */
+function constructPaymentAuthorizationFailedNotification(event) {
+  return {
+    subject: 'Payment authorization failed',
+    body: 'We were unable to authorize payment for your booking.',
+    entity: {
+      id: event.entity?.id || event.context?.booking_id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payment.capture_failed events
+ * Recipients: Customer only
+ */
+function constructPaymentCaptureFailedNotification(event) {
+  return {
+    subject: 'Payment required',
+    body: 'We were unable to process your payment. Please open the Haul app to update your payment and keep your account active.',
+    entity: {
+      id: event.entity?.id || event.context?.invoice_id,
+      type: 'invoice'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payment.captured events
+ * Recipients: Customer (receipt)
+ */
+function constructPaymentCapturedNotification(event) {
+  const bookingNumber = event.context?.booking_number || 'N/A';
+  return {
+    subject: `Receipt for booking ${bookingNumber}`,
+    body: `Your payment for booking ${bookingNumber} has been processed.`,
+    entity: {
+      id: event.entity?.id || event.context?.booking_id,
+      type: 'booking'
+    },
+    data: event.context || {}
+  };
+}
+
+/**
+ * Construct notification content for haul.payout.sent events
+ * Recipients: Service provider (OWNER/ADMIN)
+ */
+function constructPayoutSentNotification(event) {
+  return {
+    subject: 'Payout sent',
+    body: 'A payout has been sent to your bank account.',
+    entity: {
+      id: event.entity?.id || event.context?.company_id,
+      type: 'company'
+    },
+    data: event.context || {}
+  };
+}
+
+const SENDER_TYPE_ROLE = {
+  customer: 'Customer',
+  driver: 'Driver',
+  company_user: 'Dispatcher',
+};
+
+/**
+ * Construct notification content for haul.message.created events
+ * Push/SMS only — email is suppressed for this event type.
+ *
+ * Subject: "{given_name}" (always shown on lock screen)
+ * Body: message preview (iOS hides on locked screen per user's Show Previews setting)
+ */
+function constructMessageCreatedNotification(event) {
+  const ctx = event.context || {};
+  const senderType = ctx.sender_type || 'customer';
+  const role = SENDER_TYPE_ROLE[senderType] || senderType;
+  const givenName = ctx.sender_given_name || role;
+  const subject = givenName;
+  const body = ctx.message_preview || 'New message';
+
+  const profilePhotoUrl = ctx.sender_profile_photo_key
+    ? `${MEDIA_BASE_URL}/${ctx.sender_profile_photo_key}`
+    : null;
+
+  return {
+    subject,
+    body,
+    entity: {
+      id: event.entity.id,
+      type: 'thread',
+    },
+    data: {
+      thread_id: ctx.thread_id,
+      booking_id: ctx.booking_id,
+      booking_number: ctx.booking_number || '',
+      sender_profile_photo_url: profilePhotoUrl,
+    },
+  };
+}
+
+/**
+ * Load notification preferences for a user
+ * Returns default preferences if none exist
+ */
+async function loadNotificationPreferences(userId) {
+  try {
+    const result = await docClient.send(new QueryCommand({
+      TableName: NOTIFICATION_PREFERENCE_TABLE,
+      KeyConditionExpression: 'pk = :pk',
+      ExpressionAttributeValues: {
+        ':pk': `USER#${userId}`
+      }
+    }));
+
+    if (result.Items && result.Items.length > 0) {
+      console.log('[Orchestrator] Loaded preferences for user', {
+        user_id: userId,
+        preferences: result.Items[0]
+      });
+      return result.Items[0];
+    }
+
+    console.log('[Orchestrator] No preferences found, using defaults', { user_id: userId });
+
+    // Return default preferences
+    return {
+      user_id: userId,
+      channels: {
+        email: true,
+        push: false,
+        sms: false
+      }
+    };
+  } catch (error) {
+    console.error('[Orchestrator] Error loading preferences', {
+      user_id: userId,
+      error: error.message
+    });
+
+    // Return default preferences on error
+    return {
+      user_id: userId,
+      channels: {
+        email: true,
+        push: false,
+        sms: false
+      }
+    };
+  }
+}
+
+/**
+ * Determine which channels are enabled for a given event type and user preferences
+ */
+function determineEnabledChannels(eventType, preferences, metadata = {}) {
+  const channels = [];
+
+  // Email: enabled by default unless explicitly disabled or suppressed for this event type
+  const emailSuppressedEvents = [
+    'haul.booking.assigned',
+    'haul.message.created',
+    'haul.job.canceled',
+    'haul.bid.created',
+    'haul.bid.updated',
+    'haul.booking.crew_en_route_pickup',  // push only
+    'haul.booking.in_progress_pickup',    // push only
+    'haul.booking.crew_en_route_dropoff', // push only
+    'haul.booking.in_progress_dropoff',   // push only
+    'haul.booking.pending_confirmation',  // push only
+    'haul.booking.eta_update',            // live_activity only
+  ];
+  if (preferences.channels?.email !== false && !emailSuppressedEvents.includes(eventType)) {
+    channels.push('email');
+  }
+
+  // Push: must be explicitly enabled (Phase 2)
+  const pushSuppressedEvents = [
+    'haul.booking.eta_update', // live_activity only
+  ];
+  if (preferences.channels?.push === true && !pushSuppressedEvents.includes(eventType)) {
+    channels.push('push');
+  }
+
+  // SMS: must be explicitly enabled (Phase 3)
+  if (preferences.channels?.sms === true) {
+    // These events send SMS only when push is disabled (SMS as push fallback).
+    // booking.assigned customer follows the same rule; driver always gets SMS.
+    const SMS_PUSH_FALLBACK_EVENTS = ['haul.job.posted', 'haul.booking.created', 'haul.bid.created'];
+    const isBookingAssignedCustomer = eventType === 'haul.booking.assigned'
+      && metadata?.recipient_type === 'customer';
+    const skipSmsFallback = (SMS_PUSH_FALLBACK_EVENTS.includes(eventType) || isBookingAssignedCustomer)
+      && preferences.channels?.push === true;
+    if (!skipSmsFallback) {
+      channels.push('sms');
+    }
+  }
+
+  // Live Activity: opt-in by nature (token only exists if user started one)
+  const LIVE_ACTIVITY_EVENTS = new Set([
+    'haul.booking.crew_en_route_pickup',
+    'haul.booking.in_progress_pickup',
+    'haul.booking.crew_en_route_dropoff',
+    'haul.booking.in_progress_dropoff',
+    'haul.booking.pending_confirmation',
+    'haul.booking.eta_update',
+  ]);
+  if (LIVE_ACTIVITY_EVENTS.has(eventType)) {
+    channels.push('live_activity');
+  }
+
+  return channels;
+}
+
+/**
+ * Write notification record to NotificationInbox
+ * notification_id is generated by this service and is the primary identifier
+ * event_id is a foreign reference to the originating domain event
+ */
+async function writeToInbox(userId, event, channels, notificationContent) {
+  const timestamp = new Date().toISOString();
+  const notificationId = `${Date.now()}#${Math.random().toString(36).substring(7)}`;
+
+  const item = {
+    pk: `USER#${userId}`,
+    sk: `NOTIF#${timestamp}#${notificationId}`,
+    user_id: userId,
+    notification_id: notificationId,
+    event_id: event.event_id,
+    event_type: event.event_type,
+    entity_type: event.entity.type,
+    entity_id: event.entity.id,
+    occurred_at: event.occurred_at,
+    created_at: timestamp,
+    subject: notificationContent.subject,
+    body: notificationContent.body,
+    data: notificationContent.data || {},
+    channels: channels,
+    delivery_status: {
+      email: channels.includes('email') ? 'pending' : 'not_applicable',
+      push: channels.includes('push') ? 'pending' : 'not_applicable',
+      sms: channels.includes('sms') ? 'pending' : 'not_applicable'
+    },
+    read: false,
+    context: event.context || {},
+    gsi1pk: `USER#${userId}`,
+    gsi1sk: `UNREAD#${timestamp}`,
+    ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60
+  };
+
+  try {
+    await docClient.send(new PutCommand({
+      TableName: NOTIFICATION_INBOX_TABLE,
+      Item: item
+    }));
+
+    console.log('[Orchestrator] Wrote to inbox', {
+      user_id: userId,
+      notification_id: notificationId,
+      event_type: event.event_type
+    });
+
+    return { notificationId, timestamp };
+  } catch (error) {
+    console.error('[Orchestrator] Error writing to inbox', {
+      user_id: userId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Enqueue message to a specific channel queue
+ * notification_id is included so channels can update delivery status correctly
+ * Includes constructed notification content (subject, body) for delivery
+ */
+async function enqueueToChannel(channel, userId, event, notificationId, timestamp, metadata, notificationContent) {
+  const queueUrls = {
+    email: EMAIL_QUEUE_URL,
+    push: PUSH_QUEUE_URL,
+    sms: SMS_QUEUE_URL,
+    live_activity: LIVE_ACTIVITY_QUEUE_URL
+  };
+
+  const queueUrl = queueUrls[channel];
+  if (!queueUrl) {
+    console.warn('[Orchestrator] No queue URL for channel', { channel });
+    return;
+  }
+
+  const message = {
+    user_id: userId,
+    notification_id: notificationId,
+    notification_timestamp: timestamp,
+    event_id: event.event_id,
+    event_type: event.event_type,
+    entity_type: event.entity.type,
+    entity_id: event.entity.id,
+    occurred_at: event.occurred_at,
+    subject: notificationContent.subject,
+    body: notificationContent.body,
+    data: notificationContent.data || {},
+    context: event.context || {},
+    metadata: metadata || {}
+  };
+
+  try {
+    await sqsClient.send(new SendMessageCommand({
+      QueueUrl: queueUrl,
+      MessageBody: JSON.stringify(message)
+    }));
+
+    console.log('[Orchestrator] Enqueued to channel', {
+      channel,
+      user_id: userId,
+      notification_id: notificationId,
+      event_type: event.event_type
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Error enqueuing to channel', {
+      channel,
+      user_id: userId,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Batch-get the is_test_account flag for a list of user IDs.
+ * Returns a map of { [userId]: boolean }.
+ * DynamoDB BatchGetItem is limited to 100 keys per request; we chunk as needed.
+ */
+async function batchGetUsersIsTestAccount(userIds) {
+  const result = {};
+  if (!userIds || userIds.length === 0) return result;
+
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < userIds.length; i += CHUNK_SIZE) {
+    const chunk = userIds.slice(i, i + CHUNK_SIZE);
+    try {
+      const response = await docClient.send(new BatchGetCommand({
+        RequestItems: {
+          [USER_TABLE]: {
+            Keys: chunk.map(id => ({ id })),
+            ProjectionExpression: 'id, is_test_account',
+          },
+        },
+      }));
+      const items = response.Responses?.[USER_TABLE] || [];
+      for (const item of items) {
+        result[item.id] = item.is_test_account === true;
+      }
+    } catch (err) {
+      console.error('[Orchestrator] Failed to batch-get user is_test_account flags', {
+        error: err.message,
+        userIds: chunk,
+      });
+      // On error, conservatively treat all users as non-test (do not notify them for test events)
+      for (const id of chunk) {
+        if (!(id in result)) result[id] = false;
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Enqueue event to admin channel
+ * Admin channel receives the full event, resolved recipient data, and enriched notification content
+ * Does NOT check notification preferences
+ */
+async function enqueueToAdminChannel(event, resolvedRecipients, notificationContent) {
+  if (!ADMIN_QUEUE_URL) {
+    console.warn('[Orchestrator] ADMIN_QUEUE_URL not configured, skipping admin channel');
+    return;
+  }
+
+  const message = {
+    event_id: event.event_id,
+    event_type: event.event_type,
+    occurred_at: event.occurred_at,
+    actor: event.actor,
+    entity: event.entity,
+    context: event.context || {},
+    recipients: event.recipients,
+    // Include resolved recipient data (enriched by resolver)
+    resolved_recipients: resolvedRecipients.map(r => ({
+      user_id: r.user_id,
+      metadata: r.metadata || {}
+    })),
+    recipient_count: resolvedRecipients.length,
+    // Include enriched notification content (same data sent to email/push/sms)
+    notification_content: {
+      subject: notificationContent.subject,
+      body: notificationContent.body,
+      data: notificationContent.data || {},
+      entity: notificationContent.entity || {}
+    }
+  };
+
+  try {
+    await sqsClient.send(new SendMessageCommand({
+      QueueUrl: ADMIN_QUEUE_URL,
+      MessageBody: JSON.stringify(message)
+    }));
+
+    console.log('[Orchestrator] Enqueued to admin channel', {
+      event_id: event.event_id,
+      event_type: event.event_type,
+      recipient_count: resolvedRecipients.length
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Error enqueuing to admin channel', {
+      event_id: event.event_id,
+      error: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Send one SQS message per company for haul.job.posted so the realtime
+ * service can fan out a `job.available` WebSocket message to connected dispatchers.
+ * Uses SQS (which has a VPC Interface Endpoint) instead of EventBridge (which does not).
+ * Failures are non-fatal — this is an enhancement, not a delivery requirement.
+ */
+async function sendJobAvailableMessages(jobId, companyIds) {
+  if (!companyIds || companyIds.length === 0) return;
+  if (!JOB_AVAILABLE_QUEUE_URL) return;
+
+  const sends = companyIds.map(companyId =>
+    sqsClient.send(new SendMessageCommand({
+      QueueUrl: JOB_AVAILABLE_QUEUE_URL,
+      MessageBody: JSON.stringify({ company_id: companyId, job_id: jobId }),
+    }))
+  );
+
+  try {
+    await Promise.all(sends);
+    console.log('[Orchestrator] Sent job-available SQS messages', {
+      job_id: jobId,
+      company_count: companyIds.length,
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Failed to send job-available SQS messages', {
+      job_id: jobId,
+      error: error.message,
+    });
+    // Non-fatal — do not rethrow
+  }
+}
+
+/**
+ * Send one SQS message per company for haul.job.canceled so the realtime service
+ * can fan out a `job.removed` WebSocket message to all dispatchers in the service area.
+ *
+ * Unlike the notification resolver (which only targets bidding companies), this performs
+ * the same OpenSearch geo-query as job_posted_resolver to find ALL companies whose
+ * service area contains the canceled job's pickup location. This ensures every dispatcher
+ * browsing available jobs sees the removal instantly — not just those who bid.
+ *
+ * Failures are non-fatal — the 2-minute poll in the portal acts as a safety net.
+ */
+async function sendJobRemovedMessages(jobId) {
+  if (!JOB_REMOVED_QUEUE_URL) return;
+
+  try {
+    const job = await loadJobData(jobId);
+    if (!job) {
+      console.warn('[Orchestrator] sendJobRemovedMessages: job not found', { job_id: jobId });
+      return;
+    }
+
+    const pickupStop = job.stops?.find(s => s.stop_type === 'PICKUP') || job.stops?.[0];
+    const lat = pickupStop?.location?.lat;
+    const lon = pickupStop?.location?.lon;
+
+    if (typeof lat !== 'number' || typeof lon !== 'number') {
+      console.warn('[Orchestrator] sendJobRemovedMessages: no pickup lat/lon', { job_id: jobId });
+      return;
+    }
+
+    const osClient = getOpenSearchClient();
+    const response = await osClient.search({
+      index: 'service_areas',
+      body: {
+        query: buildResolverCoarseServiceAreasQuery(lat, lon),
+        size: 100,
+      },
+    });
+
+    const hits = response.body.hits.hits || [];
+    const matchingAreas = hits
+      .map(h => h._source)
+      .filter(sa => {
+        const t = normalizeServiceAreaType(sa.type);
+        if (t === 'polygon' || t === 'municipality') {
+          return isValidGeoShapeGeometry(sa.geometry);
+        }
+        if (
+          typeof sa.center?.lat !== 'number' ||
+          typeof sa.center?.lon !== 'number' ||
+          typeof sa.radius_km !== 'number' ||
+          sa.radius_km <= 0
+        ) return false;
+
+        const dLat = ((sa.center.lat - lat) * Math.PI) / 180;
+        const dLon = ((sa.center.lon - lon) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat * Math.PI) / 180) *
+            Math.cos((sa.center.lat * Math.PI) / 180) *
+            Math.sin(dLon / 2) ** 2;
+        const distanceKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return distanceKm <= sa.radius_km;
+      });
+
+    const companyIds = [...new Set(matchingAreas.map(sa => sa.company_id).filter(Boolean))];
+
+    if (companyIds.length === 0) {
+      console.log('[Orchestrator] sendJobRemovedMessages: no companies in service area', { job_id: jobId });
+      return;
+    }
+
+    const sends = companyIds.map(companyId =>
+      sqsClient.send(new SendMessageCommand({
+        QueueUrl: JOB_REMOVED_QUEUE_URL,
+        MessageBody: JSON.stringify({ company_id: companyId, job_id: jobId }),
+      }))
+    );
+
+    await Promise.all(sends);
+    console.log('[Orchestrator] Sent job-removed SQS messages', {
+      job_id: jobId,
+      company_count: companyIds.length,
+    });
+  } catch (error) {
+    console.error('[Orchestrator] Failed to send job-removed SQS messages', {
+      job_id: jobId,
+      error: error.message,
+    });
+    // Non-fatal — do not rethrow
+  }
+}

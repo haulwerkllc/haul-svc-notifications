@@ -1,0 +1,668 @@
+/**
+ * Admin Channel Handler
+ * 
+ * Receives notification events from the admin SQS queue and forwards them
+ * to Slack for internal monitoring.
+ * 
+ * Characteristics:
+ * - Does NOT check NotificationPreferences (internal notifications only)
+ * - Receives post-resolver enriched data
+ * - Delivers to Slack webhook
+ * - Supports both admin-only events and dual-routing (user + admin)
+ */
+
+const { postToSlack } = require('../../../utils/slack-notifier');
+
+/**
+ * Lambda handler for processing admin channel messages
+ * @param {Object} event - SQS event with messages from admin queue
+ */
+exports.handler = async (event) => {
+  console.log('[AdminChannel] Processing batch', {
+    record_count: event.Records.length
+  });
+
+  const results = [];
+
+  for (const record of event.Records) {
+    try {
+      const message = JSON.parse(record.body);
+      console.log('[AdminChannel] Processing message', {
+        event_id: message.event_id,
+        event_type: message.event_type,
+        recipient_count: message.recipient_count
+      });
+
+      await processAdminNotification(message);
+
+      results.push({
+        messageId: record.messageId,
+        status: 'success'
+      });
+    } catch (error) {
+      console.error('[AdminChannel] Error processing message', {
+        messageId: record.messageId,
+        error: error.message,
+        stack: error.stack
+      });
+
+      results.push({
+        messageId: record.messageId,
+        status: 'failed',
+        error: error.message
+      });
+
+      // Re-throw to trigger SQS retry/DLQ
+      throw error;
+    }
+  }
+
+  console.log('[AdminChannel] Batch processing complete', {
+    total: results.length,
+    successful: results.filter(r => r.status === 'success').length,
+    failed: results.filter(r => r.status === 'failed').length
+  });
+
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ results })
+  };
+};
+
+/**
+ * Process a single admin notification message
+ * Routes to Slack webhook based on event type
+ */
+async function processAdminNotification(message) {
+  const { event_type } = message;
+
+  // Only process specific event types
+  const supportedEvents = [
+    'haul.job.posted',
+    'haul.bid.created',
+    'haul.booking.created',
+    'haul.transfer.completed',
+    'haul.transfer.failed'
+  ];
+  
+  if (!supportedEvents.includes(event_type)) {
+    console.log('[AdminChannel] Event type not configured for Slack notifications', { event_type });
+    return;
+  }
+
+  // Build Slack Block Kit payload
+  const slackPayload = buildSlackMessage(message);
+
+  if (!slackPayload) {
+    console.warn('[AdminChannel] Unable to build Slack message', { event_type });
+    return;
+  }
+
+  // Determine target Slack channel based on event type
+  const transferEvents = ['haul.transfer.completed', 'haul.transfer.failed'];
+  const channel = transferEvents.includes(event_type) ? 'transfers' : 'notifications';
+
+  // Send to Slack
+  try {
+    await postToSlack(slackPayload, channel);
+    console.log('[AdminChannel] Successfully posted to Slack', { event_type, channel });
+  } catch (error) {
+    // Log but don't throw - Slack notifications are non-blocking
+    console.error('[AdminChannel] Failed to post to Slack', {
+      event_type,
+      channel,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Build Slack Block Kit message for supported events
+ * @param {Object} message - Admin notification message from orchestrator
+ * @returns {Object|null} Slack Block Kit payload or null if event not supported
+ */
+function buildSlackMessage(message) {
+  const { event_type } = message;
+
+  switch (event_type) {
+    case 'haul.job.posted':
+      return buildJobPostedSlackMessage(message);
+    case 'haul.bid.created':
+      return buildBidCreatedSlackMessage(message);
+    case 'haul.booking.created':
+      return buildBookingCreatedSlackMessage(message);
+    case 'haul.transfer.completed':
+      return buildTransferCompletedSlackMessage(message);
+    case 'haul.transfer.failed':
+      return buildTransferFailedSlackMessage(message);
+    default:
+      return null;
+  }
+}
+
+/**
+ * Format environment name for display
+ */
+function formatEnvironment(env) {
+  const envMap = {
+    'dev': 'Development',
+    'stage': 'Staging',
+    'main': 'Live'
+  };
+  return envMap[env] || env || 'Unknown';
+}
+
+/**
+ * Normalize job type
+ */
+function normalizeJobType(dataType) {
+  if (!dataType) return 'Not specified';
+  const typeMap = {
+    'JUNK_REMOVAL': 'Junk Removal',
+    'MOVING': 'Moving',
+    'E_WASTE': 'E-Waste Recycling',
+    'MUNICIPAL_WASTER': 'Municipal Waste',
+    'HAZARDOUS_WASTE': 'Hazardous Waste'
+  };
+  return typeMap[dataType] || dataType;
+}
+
+/**
+ * Build Slack message for haul.job.posted
+ */
+function buildJobPostedSlackMessage(message) {
+  const { notification_content, entity } = message;
+  const env = formatEnvironment(process.env.ENV);
+
+  // Extract enriched job data from notification_content.data
+  const data = notification_content.data || {};
+  
+  const jobType = normalizeJobType(data.job_type);
+  const pickupStop = getPickupStop(data.stops);
+  const address = formatStopAddress(pickupStop);
+  const pickupTimezone = pickupStop?.timezone || null;
+
+  // Format timing
+  const timing = formatTimingPreference(
+    data.timing_preference,
+    data.preferred_pickup_window_start,
+    data.preferred_pickup_window_end,
+    pickupTimezone
+  );
+
+  // Format bidding closes at
+  const biddingClosesAt = data.bidding_closes_at
+    ? formatDateTime(data.bidding_closes_at, pickupTimezone)
+    : 'Not specified';
+
+  return {
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `🔔 New ${jobType} Job Posted (${env})`,
+          emoji: true
+        }
+      },
+      {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Job ID: ', style: { bold: true } },
+              { type: 'text', text: entity.id }]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Address: ', style: { bold: true } },
+              { type: 'text', text: address }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Timing: ', style: { bold: true } },
+              { type: 'text', text: timing }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Bidding Closes: ', style: { bold: true } },
+              { type: 'text', text: biddingClosesAt }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Build Slack message for haul.bid.created
+ */
+function buildBidCreatedSlackMessage(message) {
+  const { notification_content, entity } = message;
+  const env = formatEnvironment(process.env.ENV);
+
+  // Extract enriched bid data from notification_content.data
+  const data = notification_content.data || {};
+  
+  // Try formatted first, fall back to formatting raw value
+  const quotedAmount = data.bid_amount_formatted 
+    || (data.bid_amount_cents || data.amount_cents ? formatCurrency(data.bid_amount_cents || data.amount_cents) : 'Not specified');
+  const companyName = data.company_name || 'Unknown company';
+  const jobType = normalizeJobType(data.job_type);
+  const pickupStop = data.location_formatted ? null : getPickupStop(data.stops);
+  const address = data.location_formatted || formatStopAddress(pickupStop);
+
+  // Use pre-formatted service window from orchestrator if available
+  const pickupTimezone = pickupStop?.timezone || data.pickup_timezone || null;
+  const serviceWindow = data.pickup_window_formatted || formatTimeWindow(
+    data.proposed_pickup_window_start,
+    data.proposed_pickup_window_end,
+    pickupTimezone
+  );
+
+  // Format bidding closes at
+  const biddingClosesAt = data.bidding_closes_at
+    ? formatDateTime(data.bidding_closes_at, pickupTimezone)
+    : 'Not specified';
+
+  return {
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `💰 New ${jobType} Bid Created (${env})`,
+          emoji: true
+        }
+      },
+      {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Bid ID: ', style: { bold: true } },
+              { type: 'text', text: entity.id }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Quoted Amount: ', style: { bold: true } },
+              { type: 'text', text: quotedAmount }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Company: ', style: { bold: true } },
+              { type: 'text', text: companyName }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Address: ', style: { bold: true } },
+              { type: 'text', text: address }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Service Window: ', style: { bold: true } },
+              { type: 'text', text: serviceWindow }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Bidding Closes: ', style: { bold: true } },
+              { type: 'text', text: biddingClosesAt }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Build Slack message for haul.booking.created
+ */
+function buildBookingCreatedSlackMessage(message) {
+  const { notification_content, entity } = message;
+  const env = formatEnvironment(process.env.ENV);
+
+  // Extract enriched booking data from notification_content.data
+  const data = notification_content.data || {};
+  
+  // Try formatted first, fall back to formatting raw value
+  const bookedAmount = data.booking_amount_formatted 
+    || (data.amount_cents ? formatCurrency(data.amount_cents) : 'Not specified');
+  const companyName = data.company_name || 'Unknown company';
+  const jobType = normalizeJobType(data.job_type);
+  const bookingPickupStop = data.location_formatted ? null : getPickupStop(data.stops);
+  const bookingAddress = data.location_formatted || formatStopAddress(bookingPickupStop);
+
+  // Use pre-formatted service window from orchestrator if available
+  const bookingPickupTimezone = bookingPickupStop?.timezone || data.pickup_timezone || null;
+  const serviceWindow = data.pickup_window_formatted || formatTimeWindow(
+    data.pickup_window_start,
+    data.pickup_window_end,
+    bookingPickupTimezone
+  );
+
+  return {
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `✅ ${jobType} Booking Created (${env})`,
+          emoji: true
+        }
+      },
+      {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Booking ID: ', style: { bold: true } },
+              { type: 'text', text: entity.id }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Booked Amount: ', style: { bold: true } },
+              { type: 'text', text: bookedAmount }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Company: ', style: { bold: true } },
+              { type: 'text', text: companyName }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Address: ', style: { bold: true } },
+              { type: 'text', text: bookingAddress }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Service Window: ', style: { bold: true } },
+              { type: 'text', text: serviceWindow }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Format a stop object into a readable address string.
+ * If !display_name, renders line_1 as display_name.
+ * Includes display_name (e.g., business name) if present and differs from line_1.
+ */
+function formatStopAddress(stop) {
+  if (!stop) return 'Not specified';
+  if (typeof stop === 'string') return stop;
+
+  const parts = [];
+
+  // Determine display_name: use stop.display_name, or fallback to line_1
+  const displayName = stop.display_name || stop.line_1;
+
+  // Show display_name if it exists and differs from line_1
+  if (displayName && displayName !== stop.line_1) {
+    parts.push(displayName);
+  }
+
+  if (stop.line_1) {
+    parts.push(stop.line_1);
+    if (stop.line_2) parts.push(stop.line_2);
+  }
+
+  if (stop.city) parts.push(stop.city);
+  if (stop.state) parts.push(stop.state);
+  if (stop.postal_code) parts.push(stop.postal_code);
+
+  return parts.length > 0 ? parts.join(', ') : 'Not specified';
+}
+
+/**
+ * Get the PICKUP stop from stops array.
+ */
+function getPickupStop(stops) {
+  if (!stops || !Array.isArray(stops) || stops.length === 0) return null;
+  return stops.find(s => s.stop_type === 'PICKUP') || stops[0];
+}
+
+/**
+ * Format cents to USD currency
+ */
+function formatCurrency(cents) {
+  if (cents === null || cents === undefined) return 'Not specified';
+  const dollars = cents / 100;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(dollars);
+}
+
+/**
+ * Format timing preference for job posting
+ */
+function formatTimingPreference(preference, windowStart, windowEnd, timezone) {
+  if (preference === 'FLEXIBLE' || !windowStart || !windowEnd) {
+    return 'Flexible';
+  }
+
+  return formatTimeWindow(windowStart, windowEnd, timezone);
+}
+
+/**
+ * Format time window (start - end)
+ */
+function formatTimeWindow(start, end, timezone) {
+  if (!start || !end) return 'Not specified';
+
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+
+  const dateOptions = {
+    month: 'short',
+    day: 'numeric',
+    ...(timezone && { timeZone: timezone })
+  };
+
+  const timeOptions = {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    ...(timezone && { timeZone: timezone })
+  };
+
+  const formatDate = (date) => date.toLocaleDateString('en-US', dateOptions);
+  const formatTime = (date) => date.toLocaleTimeString('en-US', timeOptions);
+
+  // Same day
+  if (startDate.toDateString() === endDate.toDateString()) {
+    return `${formatDate(startDate)}, ${formatTime(startDate)} - ${formatTime(endDate)}`;
+  }
+
+  // Different days
+  return `${formatDate(startDate)} ${formatTime(startDate)} - ${formatDate(endDate)} ${formatTime(endDate)}`;
+}
+
+/**
+ * Format single datetime
+ */
+function formatDateTime(isoString, timezone) {
+  if (!isoString) return 'Not specified';
+
+  const date = new Date(isoString);
+  const options = {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    ...(timezone && { timeZone: timezone })
+  };
+
+  return date.toLocaleString('en-US', options);
+}
+
+/**
+ * Build Slack message for haul.transfer.completed
+ */
+function buildTransferCompletedSlackMessage(message) {
+  const { notification_content } = message;
+  const env = formatEnvironment(process.env.ENV);
+
+  // Extract data from notification_content.data
+  const data = notification_content.data || {};
+  
+  const transferAmount = formatCurrency(data.transfer_amount_cents);
+  const bookingId = data.booking_id || 'Unknown';
+  const transferId = data.transfer_id || 'Unknown';
+  const companyName = data.company_name || 'Unknown company';
+  const timestamp = data.timestamp ? formatDateTime(data.timestamp) : 'Just now';
+
+  return {
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `💸 Transfer Completed (${env})`,
+          emoji: true
+        }
+      },
+      {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Booking ID: ', style: { bold: true } },
+              { type: 'text', text: bookingId }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Transfer ID: ', style: { bold: true } },
+              { type: 'text', text: transferId }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Transfer Amount: ', style: { bold: true } },
+              { type: 'text', text: transferAmount }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Company: ', style: { bold: true } },
+              { type: 'text', text: companyName }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Timestamp: ', style: { bold: true } },
+              { type: 'text', text: timestamp }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Build Slack message for haul.transfer.failed
+ */
+function buildTransferFailedSlackMessage(message) {
+  const { notification_content } = message;
+  const env = formatEnvironment(process.env.ENV);
+
+  // Extract data from notification_content.data
+  const data = notification_content.data || {};
+  
+  const bookingId = data.booking_id || 'Unknown';
+  const attempt = data.attempt !== undefined ? data.attempt : 'Unknown';
+  const errorMessage = data.error_message || 'Unknown error';
+  const timestamp = data.timestamp ? formatDateTime(data.timestamp) : 'Just now';
+
+  return {
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: `❌ Transfer Failed - Manual Intervention Required (${env})`,
+          emoji: true
+        }
+      },
+      {
+        type: 'rich_text',
+        elements: [
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Booking ID: ', style: { bold: true } },
+              { type: 'text', text: bookingId }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Retry Attempts: ', style: { bold: true } },
+              { type: 'text', text: `${attempt} (max reached)` }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Error: ', style: { bold: true } },
+              { type: 'text', text: errorMessage }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: 'Timestamp: ', style: { bold: true } },
+              { type: 'text', text: timestamp }
+            ]
+          },
+          {
+            type: 'rich_text_section',
+            elements: [
+              { type: 'text', text: '\n⚠️ Action Required: ', style: { bold: true } },
+              { type: 'text', text: 'Invoices remain in PAID_PENDING_RELEASE status. Manual release or refund required.' }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
