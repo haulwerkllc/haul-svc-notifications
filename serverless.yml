@@ -12,14 +12,12 @@ provider:
   environment:
     ENV: ${sls:stage}
     REGION: ${aws:region}
-    DOMAIN_NAME: ${self:custom.env.DOMAIN_NAME}
-    MEDIA_BASE_URL: ${self:custom.env.MEDIA_BASE_URL}
-    BASE_URL: ${self:custom.env.BASE_URL}
-    DISPATCHER_BASE_URL: ${self:custom.env.DISPATCHER_BASE_URL}
-    USER_POOL_ID: ${self:custom.env.USER_POOL_ID}
-    USER_POOL_NAME: ${self:custom.env.USER_POOL_NAME}
-    COGNITO_DOMAIN: ${self:custom.env.COGNITO_DOMAIN}
-    SUPPORT_EMAIL: ${self:custom.env.SUPPORT_EMAIL}
+    MEDIA_BASE_URL: ${ssm:/haul/${sls:stage}/media-base-url}
+    DISPATCHER_BASE_URL: ${ssm:/haul/${sls:stage}/dispatcher-base-url}
+    USER_POOL_ID: ${ssm:/haul/${sls:stage}/cognito/user-pool-id}
+    USER_POOL_NAME: ${ssm:/haul/${sls:stage}/cognito/user-pool-name}
+    COGNITO_DOMAIN: ${ssm:/haul/${sls:stage}/cognito/auth-domain}
+    SUPPORT_EMAIL: support@haulwerk.com
     NOTIFICATION_PREFERENCE_TABLE_NAME: NotificationPreference-${sls:stage}
     NOTIFICATION_INBOX_TABLE_NAME: NotificationInbox-${sls:stage}
     SMS_SUPRESSION_TABLE_NAME: SmsSuppression-${sls:stage}
@@ -31,10 +29,10 @@ provider:
     USER_TABLE_NAME: User-${sls:stage}
     COMPANY_ROLE_TABLE_NAME: CompanyRole-${sls:stage}
     INVOICE_TABLE_NAME: Invoice-${sls:stage}
-    SES_FROM_ADDRESS: ${self:custom.env.SES_FROM_ADDRESS}
-    SES_SOURCE_ARN: ${self:custom.env.SES_SOURCE_ARN}
-    SMS_ORIGINATION_IDENTITY_ARN: ${self:custom.env.SMS_ORIGINATION_IDENTITY_ARN, ''}
-    SMS_ORIGINATION_NUMBER: ${self:custom.env.SMS_ORIGINATION_NUMBER, ''}
+    SES_FROM_ADDRESS: ${ssm:/haul/${sls:stage}/ses/from-address}
+    SES_SOURCE_ARN: ${ssm:/haul/${sls:stage}/ses/source-arn}
+    SMS_ORIGINATION_IDENTITY_ARN: ${ssm:/haul/${sls:stage}/sms/origination-arn}
+    SMS_ORIGINATION_NUMBER: ${ssm:/haul/${sls:stage}/sms/origination-number}
     REDIS_HOST: ${ssm:/haul/${sls:stage}/redis/host}
     REDIS_PORT: ${ssm:/haul/${sls:stage}/redis/port}
     REDIS_USERNAME: ${ssm:/haul/${sls:stage}/redis/username}
@@ -109,8 +107,7 @@ provider:
             Resource:
               - arn:aws:secretsmanager:${aws:region}:${aws:accountId}:secret:haul/apns/*
 
-custom: 
-  env: ${file(env.${sls:stage}.json)}
+custom:
   haulBundleId:
     dev: com.haulwerk.haul.dev
     stage: com.haulwerk.haul.stage

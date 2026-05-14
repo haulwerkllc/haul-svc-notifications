@@ -1,0 +1,66 @@
+name: "Serverless — main"
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      - name: Write env config
+        run: echo '${{ secrets.ENV_MAIN_JSON }}' > env.main.json
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::796245059390:role/haul-sls-ci-main
+          aws-region: us-west-2
+
+      - name: Validate config
+        env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+        run: npx sls print --stage main
+
+  deploy:
+    name: Deploy (main — PRODUCTION)
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: main-apply
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm install
+
+      - name: Write env config
+        run: echo '${{ secrets.ENV_MAIN_JSON }}' > env.main.json
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::796245059390:role/haul-sls-ci-main
+          aws-region: us-west-2
+
+      - name: Deploy
+        env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
+        run: npx sls deploy --stage main --verbose

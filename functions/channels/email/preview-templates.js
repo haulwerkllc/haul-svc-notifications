@@ -12,7 +12,6 @@ const path = require('path');
 const { buildJobPostedEmail } = require('./templates');
 
 // Set required env vars for template rendering
-process.env.BASE_URL = 'https://www-dev.haulwerk.com:3443';
 process.env.SUPPORT_EMAIL = 'support@haulwerk.com';
 
 // Sample job data for preview

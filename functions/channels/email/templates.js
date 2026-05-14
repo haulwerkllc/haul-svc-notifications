@@ -9,7 +9,6 @@
  * - Practical and respectful of users' time
  */
 
-const BASE_URL = process.env.BASE_URL;
 const DISPATCHER_BASE_URL = process.env.DISPATCHER_BASE_URL;
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL;
 
@@ -280,7 +279,7 @@ function buildConsumerTemplate({ subject, preheader, bodyContent, footerNote }) 
       <img src="https://cdn.haulwerk.com/images/haul_wordmark_icon_white_char.svg" alt="Haul" class="footer-logo logo-dark">
       ${footerNote ? `<p style="margin: 0 0 12px 0;">${footerNote}</p>` : ''}
       <p style="margin: 0 0 8px 0;">You received this because you have subscribed to transactional notifications from Haul.
-        Please visit the Haul app or website to update your <a href="${BASE_URL}/user/preferences">notification preferences</a>· 
+        Please visit the Haul app to update your notification preferences</a>· 
         If you believe you received this email in error, contact us at <a href="mailto:${SUPPORT_EMAIL}">support@haulwerk.com</a>.
       </p>
       <p style="margin: 8px 0 0 0;">© ${new Date().getFullYear()} Haulwerk, LLC</p>
@@ -581,11 +580,8 @@ function buildJobClosedWithQuotesEmail({ jobType, location, bidCount, jobId }) {
     '',
     'Review your quotes and select one to book your service.',
     '',
-    `Review quotes: ${BASE_URL}/jobs/${jobId}`,
-    '',
     '---',
     'You received this because you posted a job on Haul.',
-    `Update preferences: ${BASE_URL}/user/preferences`,
     `Contact support: ${SUPPORT_EMAIL}`
   ];
   
@@ -635,11 +631,8 @@ function buildJobClosedNoQuotesEmail({ jobType, location, jobId }) {
     '',
     'You can repost your job to try again, or adjust the timing to improve your chances of receiving quotes.',
     '',
-    `View job: ${BASE_URL}/jobs/${jobId}`,
-    '',
     '---',
     'You received this because you posted a job on Haul.',
-    `Update preferences: ${BASE_URL}/user/preferences`,
     `Contact support: ${SUPPORT_EMAIL}`
   ];
   
@@ -688,11 +681,8 @@ function buildInstantBookExpiredEmail({ jobType, location, jobId }) {
     '',
     'You can repost the job to receive competitive bids from local providers, or try again with a different instant book price.',
     '',
-    `View job: ${BASE_URL}/jobs/${jobId}`,
-    '',
     '---',
     'You received this because you posted a job on Haul.',
-    `Update preferences: ${BASE_URL}/user/preferences`,
     `Contact support: ${SUPPORT_EMAIL}`
   ];
 
@@ -738,11 +728,8 @@ function buildJobExpiredNoSelectionEmail({ jobType, location, jobId }) {
     '',
     'If you still need the service, you can repost the job to receive new bids.',
     '',
-    `View job: ${BASE_URL}/jobs/${jobId}`,
-    '',
     '---',
     'You received this because you posted a job on Haul.',
-    `Update preferences: ${BASE_URL}/user/preferences`,
     `Contact support: ${SUPPORT_EMAIL}`
   ];
 
@@ -917,10 +904,6 @@ function buildBookingAssignedCustomerEmail(data) {
     </div>
     
     <p>Your crew has been assigned and will contact you to coordinate service.</p>
-    
-    <div class=\"cta\">
-      <a href=\"${BASE_URL}/bookings\" class=\"cta-button\" style=\"color:#ffffff !important;text-decoration:none;\">View booking</a>
-    </div>
   `;
 
   const textParts = [
@@ -937,11 +920,8 @@ function buildBookingAssignedCustomerEmail(data) {
     '',
     'Your crew has been assigned and will contact you to coordinate service.',
     '',
-    `View booking: ${BASE_URL}/bookings`,
-    '',
     '---',
     'You received this because a crew was assigned to your booking.',
-    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
@@ -1106,11 +1086,8 @@ function buildBookingCreatedCustomerEmail(data) {
     '',
     "You'll receive updates as your crew is assigned and your service day approaches.",
     '',
-    `View booking: ${BASE_URL}/bookings`,
-    '',
     '---',
     'You received this because you created an instant booking.',
-    `Manage your notification preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
@@ -1459,11 +1436,8 @@ function buildBookingCompletedCustomerEmail(data) {
     '',
     'We hope everything went smoothly. Your receipt will follow once payment is processed.',
     '',
-    `View booking: ${BASE_URL}/bookings`,
-    '',
     '---',
     'You received this because your booking was completed.',
-    `Manage preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
@@ -1595,11 +1569,8 @@ function buildBookingCanceledCustomerEmail(data) {
     '',
     'If a charge was made, any applicable refund will be processed within 5-10 business days. Contact us if you have questions.',
     '',
-    `View bookings: ${BASE_URL}/bookings`,
-    '',
     '---',
     'You received this because your booking was canceled.',
-    `Manage preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
@@ -1645,11 +1616,8 @@ function buildPaymentAuthorizationFailedEmail(data) {
     'This may be due to insufficient funds, an expired card, or a block placed by your bank.',
     'Please update your payment method or contact your bank for details.',
     '',
-    `Update payment method: ${BASE_URL}/settings/payment`,
-    '',
     '---',
     'You received this because a payment for your booking could not be authorized.',
-    `Manage preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
@@ -1865,11 +1833,8 @@ function buildPaymentCapturedEmail(data) {
 
   textParts.push(
     '',
-    `View booking: ${BASE_URL}/bookings`,
-    '',
     '---',
     'You received this as a receipt for your completed service.',
-    `Manage preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${supportEmail}`,
     '',
     ...(createdAt ? [`Booked on ${createdAt}`] : []),
@@ -2078,10 +2043,6 @@ function buildBookingRescheduledCustomerEmail(data) {
     </div>
 
     <p>If you have questions about this change, message your service provider directly in the Haul app.</p>
-
-    <div class="cta">
-      <a href="${BASE_URL}/bookings" class="cta-button" style="color:#ffffff !important;text-decoration:none;">View booking</a>
-    </div>
   `;
 
   const textParts = [
@@ -2097,11 +2058,8 @@ function buildBookingRescheduledCustomerEmail(data) {
     '',
     'If you have questions about this change, message your service provider directly in the Haul app.',
     '',
-    `View booking: ${BASE_URL}/bookings`,
-    '',
     '---',
     'You received this because your booking was rescheduled.',
-    `Manage preferences: ${BASE_URL}/user/preferences`,
     `Need help? Contact us at ${SUPPORT_EMAIL}`,
     '',
     `© ${new Date().getFullYear()} Haulwerk, LLC`
