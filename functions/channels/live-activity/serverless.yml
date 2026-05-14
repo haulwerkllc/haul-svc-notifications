@@ -1,0 +1,18 @@
+sendLiveActivityUpdate:
+  handler: functions/channels/live-activity/live_activity_handlers.handler
+  name: haul-svc-notifications-live-activity-${sls:stage}
+  description: Send Live Activity updates via direct APNs HTTP/2
+  memorySize: 256
+  timeout: 30
+  environment:
+    APNS_KEY_ID: B47HY82ZB4
+    APNS_TEAM_ID: HF7PR6HT9W
+    APNS_SECRET_NAME: haul/apns/key
+    BUNDLE_ID: ${self:custom.haulBundleId.${sls:stage}, 'com.haulwerk.haul.dev'}
+  events:
+    - sqs:
+        arn:
+          Fn::GetAtt:
+            - LiveActivityChannelQueue
+            - Arn
+        batchSize: 1

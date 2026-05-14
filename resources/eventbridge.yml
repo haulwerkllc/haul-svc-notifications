@@ -1,0 +1,13 @@
+# EventBridge Rules and Targets
+#
+# IMPORTANT: EventBridge rules and Lambda permissions are defined in central Terraform.
+# This file is intentionally empty as per the architecture document.
+# 
+# The orchestrator Lambda is invokable by EventBridge rules defined in:
+# - haul-infra-main/modules/eventbridge
+# - haul-infra-main/environments/{env}/main.tf
+#
+# Do NOT create EventBridge rules, targets, or permissions in this service.
+
+Resources: {}
+Outputs: {}

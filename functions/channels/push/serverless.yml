@@ -1,0 +1,16 @@
+pushChannelHandler:
+  handler: functions/channels/push/push_handlers.handler
+  name: haul-svc-notifications-push-channel-${sls:stage}
+  description: Push notification channel — delivers via Amazon Pinpoint (APNS/GCM)
+  memorySize: 256
+  timeout: 30
+  environment:
+    PINPOINT_APP_ID: ${ssm:/haul/${sls:stage}/pinpoint/app-id}
+    PINPOINT_DRIVER_APP_ID: ${ssm:/haul/${sls:stage}/pinpoint/driver-app-id}
+  events:
+    - sqs:
+        arn:
+          Fn::GetAtt:
+            - PushChannelQueue
+            - Arn
+        batchSize: 10

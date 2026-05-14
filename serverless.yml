@@ -1,14 +1,143 @@
-# "org" ensures this Service is used with the correct Serverless Framework Access Key.
 org: raffibag
-# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
 app: haul-microservices
-# "service" is the name of this project. This will also be added to your AWS resource names.
 service: haul-svc-notifications
+frameworkVersion: '4'
 
 provider:
   name: aws
+  versionFunctions: false
   runtime: nodejs20.x
+  region: us-west-2
+  profile: raffibag
+  environment:
+    ENV: ${sls:stage}
+    REGION: ${aws:region}
+    MEDIA_BASE_URL: ${ssm:/haul/${sls:stage}/media-base-url}
+    DISPATCHER_BASE_URL: ${ssm:/haul/${sls:stage}/dispatcher-base-url}
+    USER_POOL_ID: ${ssm:/haul/${sls:stage}/cognito/user-pool-id}
+    USER_POOL_NAME: ${ssm:/haul/${sls:stage}/cognito/user-pool-name}
+    COGNITO_DOMAIN: ${ssm:/haul/${sls:stage}/cognito/auth-domain}
+    SUPPORT_EMAIL: support@haulwerk.com
+    NOTIFICATION_PREFERENCE_TABLE_NAME: NotificationPreference-${sls:stage}
+    NOTIFICATION_INBOX_TABLE_NAME: NotificationInbox-${sls:stage}
+    SMS_SUPRESSION_TABLE_NAME: SmsSuppression-${sls:stage}
+    DEVICE_ENDPOINT_TABLE_NAME: DeviceEndpoint-${sls:stage}
+    JOB_TABLE_NAME: Job-${sls:stage}
+    BID_TABLE_NAME: Bid-${sls:stage}
+    BOOKING_TABLE_NAME: Booking-${sls:stage}
+    COMPANY_TABLE_NAME: Company-${sls:stage}
+    USER_TABLE_NAME: User-${sls:stage}
+    COMPANY_ROLE_TABLE_NAME: CompanyRole-${sls:stage}
+    INVOICE_TABLE_NAME: Invoice-${sls:stage}
+    SES_FROM_ADDRESS: ${ssm:/haul/${sls:stage}/ses/from-address}
+    SES_SOURCE_ARN: ${ssm:/haul/${sls:stage}/ses/source-arn}
+    SMS_ORIGINATION_IDENTITY_ARN: ${ssm:/haul/${sls:stage}/sms/origination-arn}
+    SMS_ORIGINATION_NUMBER: ${ssm:/haul/${sls:stage}/sms/origination-number}
+    REDIS_HOST: ${ssm:/haul/${sls:stage}/redis/host}
+    REDIS_PORT: ${ssm:/haul/${sls:stage}/redis/port}
+    REDIS_USERNAME: ${ssm:/haul/${sls:stage}/redis/username}
+    REDIS_PASSWORD: ${ssm:/haul/${sls:stage}/redis/password}
+    LOCATION_UPDATE_TOPIC_ARN: ${ssm:/haul/${sls:stage}/sns/location-updates-topic-arn}
+    SLACK_NOTIFICATIONS_CHANNEL_WEBHOOK_URL: ${ssm:/haul/slack/haul-notifications-webhook-url}
+    SLACK_TRANSFERS_CHANNEL_WEBHOOK_URL: ${ssm:/haul/slack/haul-transfers-webhook-url}
+    OPENSEARCH_ENDPOINT: ${ssm:/haul/${sls:stage}/opensearch/endpoint}
+    OPENSEARCH_VPC_SUBNET_IDS: ${ssm:/haul/${sls:stage}/opensearch/subnet-ids}
+    OPENSEARCH_VPC_SECURITY_GROUP_ID: ${ssm:/haul/${sls:stage}/opensearch/security-group-id}
+  iam:
+      role:
+        statements:
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendRawEmail
+              - sms-voice:SendTextMessage
+              - messaging:SendMessage
+              - sqs:SendMessage
+              - mobiletargeting:SendMessages
+              - events:PutEvents
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - dynamodb:*
+            Resource:
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationPreference-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationPreference-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationInbox-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/NotificationInbox-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/DeviceEndpoint-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/DeviceEndpoint-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Job-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Job-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Bid-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Bid-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Booking-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Booking-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Company-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Company-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/CompanyRole-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/CompanyRole-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/User-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/User-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/SmsSuppression-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/SmsSuppression-${sls:stage}/*
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Invoice-${sls:stage}
+              - arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Invoice-${sls:stage}/*
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/haul/platform/company_info
+          - Effect: Allow
+            Action:
+              - es:ESHttpGet
+              - es:ESHttpHead
+            Resource:
+              - arn:aws:es:${aws:region}:${aws:accountId}:domain/haul-opensearch-${sls:stage}/*
+          - Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:AssignPrivateIpAddresses
+              - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource:
+              - arn:aws:secretsmanager:${aws:region}:${aws:accountId}:secret:haul/apns/*
+
+custom:
+  haulBundleId:
+    dev: com.haulwerk.haul.dev
+    stage: com.haulwerk.haul.stage
+    main: com.haulwerk.haul
+  prune:
+    automatic: true
+    number: 5
+  includeDependencies:
+    ignore:
+      - aws-crt
 
 functions:
-  hello:
-    handler: handler.hello
+  - ${file(./functions/orchestrator/serverless.yml)}
+  - ${file(./functions/channels/email/serverless.yml)}
+  - ${file(./functions/email-changed/serverless.yml)}
+  - ${file(./functions/channels/push/serverless.yml)}
+  - ${file(./functions/channels/sms/serverless.yml)}
+  - ${file(./functions/channels/admin/serverless.yml)}
+  - ${file(./functions/channels/live-activity/serverless.yml)}
+
+resources:
+  - ${file(./resources/eventbridge.yml)}
+  - ${file(./resources/sqs.yml)}
+  - ${file(./resources/ses.yml)}
+  - ${file(./resources/iam.yml)}
+
+package:
+  individually: false
+  excludeDevDependencies: false
+
+plugins:
+  - serverless-plugin-include-dependencies
+

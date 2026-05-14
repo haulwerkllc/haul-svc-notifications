@@ -1,0 +1,13 @@
+# Amazon Pinpoint Resources - REMOVED
+#
+# Haul notifications service has migrated away from Amazon Pinpoint
+# to AWS End User Messaging-compatible APIs.
+#
+# Email delivery now uses Amazon SES v2 directly.
+# Push and SMS delivery will use AWS End User Messaging APIs when available.
+#
+# This file is preserved for historical context only.
+# No Pinpoint resources are deployed by this service.
+
+Resources: {}
+Outputs: {}

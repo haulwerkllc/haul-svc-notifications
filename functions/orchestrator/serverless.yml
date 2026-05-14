@@ -1,0 +1,24 @@
+notificationsOrchestrator:
+  handler: functions/orchestrator/handler.handler
+  name: haul-svc-notifications-orchestrator-${sls:stage}
+  description: EventBridge consumer that orchestrates all notification delivery
+  memorySize: 512
+  timeout: 30
+  vpc:
+    subnetIds: ${self:provider.environment.OPENSEARCH_VPC_SUBNET_IDS, ''}
+    securityGroupIds:
+      - ${self:provider.environment.OPENSEARCH_VPC_SECURITY_GROUP_ID, ''}
+  environment:
+    OPENSEARCH_ENDPOINT: ${self:provider.environment.OPENSEARCH_ENDPOINT}
+    EMAIL_QUEUE_URL:
+      Ref: EmailChannelQueue
+    PUSH_QUEUE_URL:
+      Ref: PushChannelQueue
+    SMS_QUEUE_URL:
+      Ref: SmsChannelQueue
+    ADMIN_QUEUE_URL:
+      Ref: AdminChannelQueue
+    LIVE_ACTIVITY_QUEUE_URL:
+      Ref: LiveActivityChannelQueue
+    JOB_AVAILABLE_QUEUE_URL: https://sqs.${aws:region}.amazonaws.com/${aws:accountId}/haul-realtime-job-available-${sls:stage}
+    JOB_REMOVED_QUEUE_URL: https://sqs.${aws:region}.amazonaws.com/${aws:accountId}/haul-realtime-job-removed-${sls:stage}

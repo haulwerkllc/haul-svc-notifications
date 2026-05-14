@@ -1,0 +1,14 @@
+adminChannel:
+  handler: functions/channels/admin/handler.handler
+  name: haul-svc-notifications-admin-channel-${sls:stage}
+  description: Sends admin notifications to Slack
+  memorySize: 256
+  timeout: 30
+  events:
+    - sqs:
+        arn:
+          Fn::GetAtt:
+            - AdminChannelQueue
+            - Arn
+        batchSize: 10
+        maximumBatchingWindowInSeconds: 5

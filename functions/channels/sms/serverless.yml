@@ -1,0 +1,20 @@
+smsChannelHandler:
+  handler: functions/channels/sms/sms_handlers.handler
+  name: haul-svc-notifications-sms-channel-${sls:stage}
+  description: SMS notification channel (STUB - Phase 3)
+  memorySize: 256
+  timeout: 30
+  events:
+    - sqs:
+        arn:
+          Fn::GetAtt:
+            - SmsChannelQueue
+            - Arn
+        batchSize: 10
+
+smsInboundHandler:
+  handler: functions/channels/sms/sms_inbound_handler.handler
+  name: haul-svc-notifications-sms-inbound-${sls:stage}
+  description: Handles inbound SMS for opt-out, opt-in, and help requests
+  memorySize: 256
+  timeout: 30

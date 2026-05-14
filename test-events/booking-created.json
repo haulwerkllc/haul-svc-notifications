@@ -1,0 +1,38 @@
+{
+  "version": "0",
+  "id": "01234567-89ab-cdef-0123-456789abcdef",
+  "detail-type": "haul.booking.created",
+  "source": "haul.jobs",
+  "account": "123456789012",
+  "time": "2026-01-04T15:00:00Z",
+  "region": "us-west-2",
+  "resources": [],
+  "detail": {
+    "event_id": "evt_booking_created_20260104_003",
+    "event_type": "haul.booking.created",
+    "occurred_at": "2026-01-04T15:00:00Z",
+    "actor": {
+      "type": "user",
+      "id": "USER#customer123"
+    },
+    "recipients": {
+      "mode": "explicit",
+      "user_ids": [
+        "USER#provider456"
+      ]
+    },
+    "entity": {
+      "type": "booking",
+      "id": "BOOKING#def456"
+    },
+    "context": {
+      "booking_id": "BOOKING#def456",
+      "booking_url": "https://haul.app/bookings/def456",
+      "job_id": "JOB#789xyz",
+      "job_title": "Move furniture from LA to San Diego",
+      "pickup_date": "2026-01-10T09:00:00Z",
+      "customer_name": "John Smith",
+      "customer_phone": "+1-555-123-4567"
+    }
+  }
+}

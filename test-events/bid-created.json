@@ -1,0 +1,38 @@
+{
+  "version": "0",
+  "id": "01234567-89ab-cdef-0123-456789abcdef",
+  "detail-type": "haul.bid.created",
+  "source": "haul.jobs",
+  "account": "123456789012",
+  "time": "2026-01-04T13:30:00Z",
+  "region": "us-west-2",
+  "resources": [],
+  "detail": {
+    "event_id": "evt_bid_created_20260104_002",
+    "event_type": "haul.bid.created",
+    "occurred_at": "2026-01-04T13:30:00Z",
+    "actor": {
+      "type": "user",
+      "id": "USER#provider456"
+    },
+    "recipients": {
+      "mode": "explicit",
+      "user_ids": [
+        "USER#customer123"
+      ]
+    },
+    "entity": {
+      "type": "bid",
+      "id": "BID#abc123"
+    },
+    "context": {
+      "bid_id": "BID#abc123",
+      "bid_amount": "$450.00",
+      "bid_url": "https://haul.app/bids/abc123",
+      "job_id": "JOB#789xyz",
+      "job_title": "Move furniture from LA to San Diego",
+      "provider_name": "Fast Haul Transport",
+      "provider_rating": "4.8"
+    }
+  }
+}

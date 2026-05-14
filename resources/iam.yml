@@ -1,0 +1,86 @@
+Resources:
+  # ================================
+  # Lambda Permissions (Resource-Based Policies)
+  # ================================
+
+  # Allow EventBridge to invoke the orchestrator Lambda
+  # Source ARN constructed from known rule naming convention in Terraform
+  OrchestratorEventBridgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt NotificationsOrchestratorLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/notifications-${sls:stage}
+
+  # Allow EventBridge to invoke the orchestrator Lambda for message.created notifications
+  # Source ARN constructed from known rule naming convention in Terraform
+  OrchestratorMessageCreatedEventBridgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt NotificationsOrchestratorLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/message-created-notifications-${sls:stage}
+
+  # Allow EventBridge to invoke the orchestrator Lambda for booking.eta_update (Live Activity push)
+  # Source ARN constructed from known rule naming convention in Terraform (booking-eta-update-{env})
+  OrchestratorBookingEtaUpdateEventBridgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt NotificationsOrchestratorLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/booking-eta-update-${sls:stage}
+
+  # Allow EventBridge to invoke the send-email-changed Lambda
+  # Source ARN constructed from known rule naming convention in Terraform (email-changed-{env})
+  SendEmailChangedEventBridgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SendEmailChangedNotificationLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/email-changed-${sls:stage}
+
+  # Allow SNS to invoke the SMS inbound handler Lambda
+  # Source ARN constructed from known SNS topic naming convention in Terraform
+  SmsInboundSNSPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SmsInboundHandlerLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Sub arn:aws:sns:${AWS::Region}:${AWS::AccountId}:haul-sms-inbound-${sls:stage}
+
+  # ================================
+  # IAM Policies for Notification Service
+  # ================================
+
+  # Policy: Orchestrator can send to SQS queues
+  OrchestratorSQSPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: haul-notifications-orchestrator-sqs-${sls:stage}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueUrl
+            Resource:
+              - Fn::GetAtt:
+                  - EmailChannelQueue
+                  - Arn
+              - Fn::GetAtt:
+                  - PushChannelQueue
+                  - Arn
+              - Fn::GetAtt:
+                  - SmsChannelQueue
+                  - Arn
+              - Fn::GetAtt:
+                  - LiveActivityChannelQueue
+                  - Arn
+      Roles:
+        - Ref: IamRoleLambdaExecution
