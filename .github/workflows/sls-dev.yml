@@ -23,9 +23,6 @@ jobs:
 
       - run: npm install
 
-      - name: Write env config
-        run: echo '${{ secrets.ENV_DEV_JSON }}' > env.dev.json
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
