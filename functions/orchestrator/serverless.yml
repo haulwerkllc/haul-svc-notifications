@@ -5,7 +5,7 @@ notificationsOrchestrator:
   memorySize: 512
   timeout: 30
   vpc:
-    subnetIds: ${self:provider.environment.OPENSEARCH_VPC_SUBNET_IDS, ''}
+    subnetIds: ${ssm:/haul/${sls:stage}/opensearch/subnet-ids}
     securityGroupIds:
       - ${self:provider.environment.OPENSEARCH_VPC_SECURITY_GROUP_ID, ''}
   environment:
