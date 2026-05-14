@@ -1,5 +1,3 @@
-org: raffibag
-app: haul-microservices
 service: haul-svc-notifications
 frameworkVersion: '4'
 
@@ -8,7 +6,6 @@ provider:
   versionFunctions: false
   runtime: nodejs20.x
   region: us-west-2
-  profile: raffibag
   environment:
     ENV: ${sls:stage}
     REGION: ${aws:region}

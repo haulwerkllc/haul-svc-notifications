@@ -30,7 +30,6 @@ jobs:
 
       - name: Validate config
         env:
-          AWS_PROFILE: ""
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
         run: npx sls print --stage stage
 
@@ -57,6 +56,5 @@ jobs:
 
       - name: Deploy
         env:
-          AWS_PROFILE: ""
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
         run: npx sls deploy --stage stage --verbose
