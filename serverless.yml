@@ -1,5 +1,3 @@
-org: raffibag
-app: haul-microservices
 service: haul-svc-notifications
 frameworkVersion: '4'
 

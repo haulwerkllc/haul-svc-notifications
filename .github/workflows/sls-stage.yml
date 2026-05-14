@@ -29,11 +29,7 @@ jobs:
           aws-region: us-west-2
 
       - name: Validate config
-        env:
-          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
-        run: |
-          unset AWS_PROFILE
-          npx sls print --stage stage
+        run: npx sls print --stage stage
 
   deploy:
     name: Deploy (stage)
@@ -57,8 +53,4 @@ jobs:
           aws-region: us-west-2
 
       - name: Deploy
-        env:
-          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
-        run: |
-          unset AWS_PROFILE
-          npx sls deploy --stage stage --verbose
+        run: npx sls deploy --stage stage --verbose
